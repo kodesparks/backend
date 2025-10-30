@@ -11,6 +11,10 @@ import adminRoutes from './routes/admin.js'
 import userRoutes from './routes/users.js'
 import inventoryRoutes from './routes/inventory.js'
 import orderRoutes from './routes/order.js'
+import locationRoutes from './routes/location.js'
+import deliveryRoutes from './routes/delivery.js'
+import warehouseRoutes from './routes/warehouse.js'
+// ✅ REMOVED: syncRoutes - Using direct model approach
 import { initializeAdmin } from './utils/initAdmin.js';
 import dotenv from "dotenv";
 
@@ -52,6 +56,10 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/order", orderRoutes);
+app.use("/api/location", locationRoutes);
+app.use("/api/delivery", deliveryRoutes);
+app.use("/api/warehouse", warehouseRoutes);
+// ✅ REMOVED: app.use("/api/sync", syncRoutes) - Using direct model approach
 
 // Basic Error Handler
 app.use((err, req, res, next) => {

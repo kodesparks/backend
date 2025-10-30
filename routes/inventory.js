@@ -1,15 +1,19 @@
 import express from 'express';
 import { check, validationResult } from 'express-validator';
+import { 
+  getInventoryWithPricing, 
+  getSingleItemWithPricing,
+  inventoryPricingRules 
+} from '../controllers/inventoryPricing.js';
 import {
   createInventory,
   getAllInventory,
   getInventoryById,
   updateInventory,
   deleteInventory,
-  createInventoryPrice,
-  getInventoryPrices,
-  createInventoryShipPrice,
-  getShippingPrice,
+  updateInventoryPricing,
+  // ✅ REMOVED: createInventoryPrice, getInventoryPrices, createInventoryShipPrice, getShippingPrice
+  // ✅ REMOVED: getSingleItemPrice, getSingleItemShipping - Using direct model approach
   createPromo,
   getActivePromos,
   calculatePromoDiscount,
@@ -21,8 +25,6 @@ import {
   removeImageFromInventory,
   setPrimaryImage,
   getInventoryImages,
-  getSingleItemPrice,
-  getSingleItemShipping,
   getSingleItemPromos
 } from '../controllers/inventory.js';
 import {
@@ -50,6 +52,42 @@ const validate = (req, res, next) => {
 // ========================================
 // INVENTORY ROUTES
 // ========================================
+
+// ===== PUBLIC PRICING API ROUTES (No Authentication Required) =====
+
+/**
+ * @route   GET /api/inventory/pricing
+ * @desc    Get inventory items with calculated pricing including delivery
+ * @access  Public
+ * @query   pincode (optional), page, limit, category, subCategory, search
+ * @returns { 
+ *   success: boolean, 
+ *   data: { 
+ *     inventory: [{ _id, itemDescription, category, pricing, delivery, totalPrice }],
+ *     pagination: { currentPage, totalPages, totalItems },
+ *     pincode, destination, calculatedAt
+ *   } 
+ * }
+ */
+router.get('/pricing', inventoryPricingRules, getInventoryWithPricing);
+
+/**
+ * @route   GET /api/inventory/pricing/:itemId
+ * @desc    Get single inventory item with calculated pricing including delivery
+ * @access  Public
+ * @params  itemId: string (MongoDB ObjectId)
+ * @query   pincode (optional)
+ * @returns { 
+ *   success: boolean, 
+ *   data: { 
+ *     item: { _id, itemDescription, category, pricing, delivery, totalPrice },
+ *     pincode, calculatedAt
+ *   } 
+ * }
+ */
+router.get('/pricing/:itemId', inventoryPricingRules, getSingleItemWithPricing);
+
+// ===== AUTHENTICATED ROUTES =====
 
 // Create Inventory Item (Admin, Manager, Vendor)
 router.post('/',
@@ -115,25 +153,7 @@ router.get('/:id',
   getInventoryById
 );
 
-// Get pricing data for a single inventory item (All authenticated users)
-router.get('/:id/price',
-  authenticateToken,
-  [
-    check('id').isMongoId().withMessage('Valid inventory ID is required')
-  ],
-  validate,
-  getSingleItemPrice
-);
-
-// Get shipping data for a single inventory item (All authenticated users)
-router.get('/:id/shipping',
-  authenticateToken,
-  [
-    check('id').isMongoId().withMessage('Valid inventory ID is required')
-  ],
-  validate,
-  getSingleItemShipping
-);
+// ✅ REMOVED: getSingleItemPrice and getSingleItemShipping routes - Using /inventory/pricing/:itemId API instead
 
 // Get promo data for a single inventory item (All authenticated users)
 router.get('/:id/promo',
@@ -176,67 +196,30 @@ router.delete('/:id',
 // INVENTORY PRICE ROUTES
 // ========================================
 
-// Create/Update Inventory Price (Admin, Manager, Vendor - own items only)
-router.post('/price',
+// Update Inventory Pricing (Admin, Manager, Vendor - own items only)
+router.put('/:itemId/pricing',
   authenticateToken,
   requireAdminManagerOrVendor,
   [
-    check('itemCode').isMongoId().withMessage('Valid item code is required'),
-    check('unitPrice').isFloat({ min: 0 }).withMessage('Unit price must be a positive number'),
-    check('margin').optional().isFloat({ min: 0 }).withMessage('Margin must be a positive number'),
-    check('marginPercentage').optional().isFloat({ min: 0, max: 100 }).withMessage('Margin percentage must be between 0 and 100'),
-    check('cgst').optional().isFloat({ min: 0 }).withMessage('CGST must be a positive number'),
-    check('sgst').optional().isFloat({ min: 0 }).withMessage('SGST must be a positive number'),
-    check('igst').optional().isFloat({ min: 0 }).withMessage('IGST must be a positive number'),
-    check('tax').optional().isFloat({ min: 0 }).withMessage('Tax must be a positive number')
+    check('itemId').isMongoId().withMessage('Valid item ID is required'),
+    check('basePrice').optional().isFloat({ min: 0 }).withMessage('Base price must be a positive number'),
+    check('unitPrice').optional().isFloat({ min: 0 }).withMessage('Unit price must be a positive number'),
+    check('baseCharge').optional().isFloat({ min: 0 }).withMessage('Base charge must be a positive number'),
+    check('perKmCharge').optional().isFloat({ min: 0 }).withMessage('Per km charge must be a positive number'),
+    check('warehouseLatitude').optional().isFloat({ min: -90, max: 90 }).withMessage('Invalid latitude'),
+    check('warehouseLongitude').optional().isFloat({ min: -180, max: 180 }).withMessage('Invalid longitude')
   ],
   validate,
-  createInventoryPrice
+  updateInventoryPricing
 );
 
-// Get Inventory Prices (All authenticated users)
-router.get('/price/list',
-  authenticateToken,
-  [
-    check('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-    check('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-    check('minPrice').optional().isFloat({ min: 0 }).withMessage('Min price must be a positive number'),
-    check('maxPrice').optional().isFloat({ min: 0 }).withMessage('Max price must be a positive number')
-  ],
-  validate,
-  getInventoryPrices
-);
+// ✅ REMOVED: createInventoryPrice and getInventoryPrices routes - Using updateInventoryPricing instead
 
 // ========================================
 // INVENTORY SHIPPING PRICE ROUTES
 // ========================================
 
-// Create/Update Inventory Shipping Price (Admin, Manager, Vendor - own items only)
-router.post('/shipping',
-  authenticateToken,
-  requireAdminManagerOrVendor,
-  [
-    check('itemCode').isMongoId().withMessage('Valid item code is required'),
-    check('price0to50k').isFloat({ min: 0 }).withMessage('Price for 0-50K must be a positive number'),
-    check('price50kto100k').isFloat({ min: 0 }).withMessage('Price for 50K-100K must be a positive number'),
-    check('price100kto150k').isFloat({ min: 0 }).withMessage('Price for 100K-150K must be a positive number'),
-    check('price150kto200k').isFloat({ min: 0 }).withMessage('Price for 150K-200K must be a positive number'),
-    check('priceAbove200k').isFloat({ min: 0 }).withMessage('Price for above 200K must be a positive number')
-  ],
-  validate,
-  createInventoryShipPrice
-);
-
-// Get Shipping Price for Order (All authenticated users)
-router.get('/shipping/calculate',
-  authenticateToken,
-  [
-    check('itemCode').isMongoId().withMessage('Valid item code is required'),
-    check('orderValue').isFloat({ min: 0 }).withMessage('Order value must be a positive number')
-  ],
-  validate,
-  getShippingPrice
-);
+// ✅ REMOVED: createInventoryShipPrice and getShippingPrice routes - Using /delivery/calculate API instead
 
 // ========================================
 // PROMO ROUTES
@@ -340,5 +323,6 @@ router.get('/stats/overview',
   requireInventoryPage,
   getInventoryStats
 );
+
 
 export default router;

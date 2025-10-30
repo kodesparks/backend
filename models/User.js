@@ -149,6 +149,94 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    
+    // Warehouse Information (for vendors)
+    warehouse: {
+      warehouseName: {
+        type: String,
+        trim: true,
+      },
+      location: {
+        address: {
+          type: String,
+          trim: true,
+        },
+        city: {
+          type: String,
+          trim: true,
+        },
+        state: {
+          type: String,
+          trim: true,
+        },
+        pincode: {
+          type: String,
+          trim: true,
+          match: /^[1-9][0-9]{5}$/,
+        },
+        coordinates: {
+          latitude: {
+            type: Number,
+            min: -90,
+            max: 90,
+          },
+          longitude: {
+            type: Number,
+            min: -180,
+            max: 180,
+          },
+        },
+      },
+      categories: [{
+        type: String,
+        enum: ['Cement', 'Iron', 'Steel', 'Concrete Mixer', 'Concrete Mix'],
+      }],
+      deliveryConfig: {
+        baseDeliveryCharge: {
+          type: Number,
+          min: 0,
+          default: 0,
+        },
+        perKmCharge: {
+          type: Number,
+          min: 0,
+          default: 0,
+        },
+        minimumOrder: {
+          type: Number,
+          min: 0,
+          default: 0,
+        },
+        freeDeliveryThreshold: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        freeDeliveryRadius: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        maxDeliveryRadius: {
+          type: Number,
+          default: 500,
+          min: 0,
+        },
+      },
+      operatingHours: {
+        monday: { open: String, close: String, isOpen: { type: Boolean, default: true } },
+        tuesday: { open: String, close: String, isOpen: { type: Boolean, default: true } },
+        wednesday: { open: String, close: String, isOpen: { type: Boolean, default: true } },
+        thursday: { open: String, close: String, isOpen: { type: Boolean, default: true } },
+        friday: { open: String, close: String, isOpen: { type: Boolean, default: true } },
+        saturday: { open: String, close: String, isOpen: { type: Boolean, default: true } },
+        sunday: { open: String, close: String, isOpen: { type: Boolean, default: false } },
+      },
+      isVerified: {
+        type: Boolean,
+        default: false,
+      },
+    },
 
     // Account Status
     isPhoneVerified: {

@@ -1,6 +1,4 @@
 import Inventory from '../models/Inventory.js';
-import InventoryPrice from '../models/InventoryPrice.js';
-import InventoryShipPrice from '../models/InventoryShipPrice.js';
 import Promo from '../models/Promo.js';
 import User from '../models/User.js';
 import { deleteImageFromS3, deleteMultipleImagesFromS3 } from '../utils/awsS3.js';
@@ -22,7 +20,9 @@ export const createInventory = async (req, res, next) => {
       specification,
       deliveryInformation,
       hscCode,
-      vendorId
+      vendorId,
+      pricing,
+      warehouses
     } = req.body;
 
     // Check if vendor exists and is a vendor role
@@ -51,7 +51,11 @@ export const createInventory = async (req, res, next) => {
       deliveryInformation,
       hscCode,
       vendorId,
-      createdBy: req.user.userId
+      createdBy: req.user.userId,
+      // Include pricing data if provided
+      ...(pricing && { pricing }),
+      // Include warehouses data if provided
+      ...(warehouses && { warehouses })
     });
 
     await inventory.save();
@@ -110,6 +114,7 @@ export const getAllInventory = async (req, res, next) => {
     const inventory = await Inventory.find(filter)
       .populate('vendorId', 'name email role')
       .populate('createdBy', 'name email role')
+      .select('itemDescription category subCategory grade units details specification pricing warehouses vendorId createdBy isActive itemCode images primaryImage shipping warehouse createdDate timestamp updateDate updateTime createdAt updatedAt __v formattedItemCode id') // Explicitly select fields, excluding delivery
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -138,7 +143,8 @@ export const getInventoryById = async (req, res, next) => {
 
     const inventory = await Inventory.findById(id)
       .populate('vendorId', 'name email role')
-      .populate('createdBy', 'name email role');
+      .populate('createdBy', 'name email role')
+      .select('itemDescription category subCategory grade units details specification pricing warehouses vendorId createdBy isActive itemCode images primaryImage shipping warehouse createdDate timestamp updateDate updateTime createdAt updatedAt __v formattedItemCode id'); // Explicitly select fields, excluding delivery
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory item not found" });
@@ -175,6 +181,26 @@ export const updateInventory = async (req, res, next) => {
     delete updateData.itemCode;
     delete updateData.vendorId;
     delete updateData.createdBy;
+
+    // Preserve existing warehouses if not provided in update
+    if (!updateData.warehouses && inventory.warehouses && inventory.warehouses.length > 0) {
+      updateData.warehouses = inventory.warehouses;
+    }
+
+    // Preserve existing pricing if not provided in update
+    if (!updateData.pricing && inventory.pricing) {
+      updateData.pricing = inventory.pricing;
+    }
+
+    // Preserve existing delivery if not provided in update
+    if (!updateData.delivery && inventory.delivery) {
+      updateData.delivery = inventory.delivery;
+    }
+
+    // Preserve existing shipping if not provided in update
+    if (!updateData.shipping && inventory.shipping) {
+      updateData.shipping = inventory.shipping;
+    }
 
     Object.assign(inventory, updateData);
     await inventory.save();
@@ -220,228 +246,81 @@ export const deleteInventory = async (req, res, next) => {
 // ========================================
 
 // Create/Update Inventory Price
-export const createInventoryPrice = async (req, res, next) => {
+export const updateInventoryPricing = async (req, res, next) => {
   try {
-    const {
-      itemCode,
-      unitPrice,
-      margin,
-      marginPercentage,
-      cgst,
-      sgst,
-      igst,
-      tax
-    } = req.body;
+    const { itemId } = req.params;
+    const { basePrice, unitPrice, currency, isActive, baseCharge, perKmCharge, freeDeliveryThreshold, freeDeliveryRadius, warehouseName, warehouseLatitude, warehouseLongitude } = req.body;
 
-    // Check if inventory item exists
-    const inventory = await Inventory.findById(itemCode);
-    if (!inventory) {
-      return res.status(404).json({ message: "Inventory item not found" });
-    }
-
-    // Check access permissions
-    if (!inventory.canAccess(req.user)) {
-      return res.status(403).json({ message: "Access denied" });
-    }
-
-    // Check if price already exists
-    let inventoryPrice = await InventoryPrice.findOne({ itemCode });
-
-    if (inventoryPrice) {
-      // Update existing price
-      Object.assign(inventoryPrice, {
-        unitPrice,
-        margin,
-        marginPercentage,
-        cgst,
-        sgst,
-        igst,
-        tax
-      });
-    } else {
-      // Create new price
-      inventoryPrice = new InventoryPrice({
-        itemCode,
-        unitPrice,
-        margin,
-        marginPercentage,
-        cgst,
-        sgst,
-        igst,
-        tax,
-        vendorId: inventory.vendorId,
-        createdBy: req.user.userId
+    // Find the inventory item
+    const inventoryItem = await Inventory.findById(itemId);
+    if (!inventoryItem) {
+      return res.status(404).json({
+        success: false,
+        message: 'Inventory item not found',
+        data: null
       });
     }
 
-    await inventoryPrice.save();
-
-    await inventoryPrice.populate('itemCode', 'itemDescription category subCategory units');
-    await inventoryPrice.populate('vendorId', 'name email role');
-
-    res.status(201).json({
-      message: "Inventory price created/updated successfully",
-      inventoryPrice
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// Get Inventory Prices
-export const getInventoryPrices = async (req, res, next) => {
-  try {
-    const { 
-      page = 1, 
-      limit = 10, 
-      vendorId, 
-      minPrice, 
-      maxPrice,
-      isActive = true 
-    } = req.query;
-
-    const filter = { isActive: isActive === 'true' };
-
-    // Apply filters based on user role
-    if (req.user.role === 'vendor') {
-      filter.vendorId = req.user._id;
-    } else if (vendorId) {
-      filter.vendorId = vendorId;
+    // Update pricing
+    if (basePrice !== undefined || unitPrice !== undefined || currency !== undefined || isActive !== undefined) {
+      inventoryItem.pricing = {
+        basePrice: basePrice !== undefined ? basePrice : inventoryItem.pricing?.basePrice || 0,
+        unitPrice: unitPrice !== undefined ? unitPrice : inventoryItem.pricing?.unitPrice || 0,
+        currency: currency || inventoryItem.pricing?.currency || 'INR',
+        isActive: isActive !== undefined ? isActive : inventoryItem.pricing?.isActive || true
+      };
     }
 
-    if (minPrice || maxPrice) {
-      filter.unitPrice = {};
-      if (minPrice) filter.unitPrice.$gte = parseFloat(minPrice);
-      if (maxPrice) filter.unitPrice.$lte = parseFloat(maxPrice);
+    // Update delivery
+    if (baseCharge !== undefined || perKmCharge !== undefined || freeDeliveryThreshold !== undefined || freeDeliveryRadius !== undefined) {
+      inventoryItem.delivery = {
+        baseCharge: baseCharge !== undefined ? baseCharge : inventoryItem.delivery?.baseCharge || 0,
+        perKmCharge: perKmCharge !== undefined ? perKmCharge : inventoryItem.delivery?.perKmCharge || 0,
+        freeDeliveryThreshold: freeDeliveryThreshold !== undefined ? freeDeliveryThreshold : inventoryItem.delivery?.freeDeliveryThreshold || 0,
+        freeDeliveryRadius: freeDeliveryRadius !== undefined ? freeDeliveryRadius : inventoryItem.delivery?.freeDeliveryRadius || 0
+      };
     }
 
-    const skip = (page - 1) * limit;
+    // Note: Warehouse updates should be done through the main updateInventory function
+    // This function is for pricing and delivery updates only
+    // The warehouses array should be managed separately
 
-    const prices = await InventoryPrice.find(filter)
-      .populate('itemCode', 'itemDescription category subCategory units')
-      .populate('vendorId', 'name email role')
-      .sort({ unitPrice: 1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+    await inventoryItem.save();
 
-    const total = await InventoryPrice.countDocuments(filter);
+    // ✅ Direct model approach - no separate pricing models needed
 
-    res.status(200).json({
-      prices,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
-        hasNext: skip + prices.length < total,
-        hasPrev: page > 1
+    return res.status(200).json({
+      success: true,
+      message: 'Inventory pricing updated successfully',
+      data: {
+        inventory: inventoryItem,
+        pricing: inventoryItem.pricing,
+        delivery: inventoryItem.delivery,
+        warehouse: inventoryItem.warehouse
       }
     });
+
   } catch (error) {
-    next(error);
+    console.error('Update inventory pricing error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
   }
 };
+
+// ✅ REMOVED: createInventoryPrice - Use updateInventoryPricing instead (direct model approach)
+
+// ✅ REMOVED: getInventoryPrices - Use /inventory/pricing API instead (direct model approach)
 
 // ========================================
 // INVENTORY SHIPPING PRICE CONTROLLERS
 // ========================================
 
-// Create/Update Inventory Shipping Price
-export const createInventoryShipPrice = async (req, res, next) => {
-  try {
-    const {
-      itemCode,
-      price0to50k,
-      price50kto100k,
-      price100kto150k,
-      price150kto200k,
-      priceAbove200k
-    } = req.body;
+// ✅ REMOVED: createInventoryShipPrice - Use updateInventoryPricing instead (direct model approach)
 
-    // Check if inventory item exists
-    const inventory = await Inventory.findById(itemCode);
-    if (!inventory) {
-      return res.status(404).json({ message: "Inventory item not found" });
-    }
-
-    // Check access permissions
-    if (!inventory.canAccess(req.user)) {
-      return res.status(403).json({ message: "Access denied" });
-    }
-
-    // Check if shipping price already exists
-    let shipPrice = await InventoryShipPrice.findOne({ itemCode });
-
-    if (shipPrice) {
-      // Update existing shipping price
-      Object.assign(shipPrice, {
-        price0to50k,
-        price50kto100k,
-        price100kto150k,
-        price150kto200k,
-        priceAbove200k
-      });
-    } else {
-      // Create new shipping price
-      shipPrice = new InventoryShipPrice({
-        itemCode,
-        price0to50k,
-        price50kto100k,
-        price100kto150k,
-        price150kto200k,
-        priceAbove200k,
-        vendorId: inventory.vendorId,
-        createdBy: req.user.userId
-      });
-    }
-
-    await shipPrice.save();
-
-    await shipPrice.populate('itemCode', 'itemDescription category subCategory units');
-    await shipPrice.populate('vendorId', 'name email role');
-
-    res.status(201).json({
-      message: "Inventory shipping price created/updated successfully",
-      shipPrice
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// Get Shipping Price for Order
-export const getShippingPrice = async (req, res, next) => {
-  try {
-    const { itemCode, orderValue } = req.query;
-
-    if (!itemCode || !orderValue) {
-      return res.status(400).json({ 
-        message: "Item code and order value are required" 
-      });
-    }
-
-    const shipPrice = await InventoryShipPrice.findOne({ 
-      itemCode, 
-      isActive: true 
-    });
-
-    if (!shipPrice) {
-      return res.status(404).json({ 
-        message: "Shipping price not found for this item" 
-      });
-    }
-
-    const shippingCost = shipPrice.getShippingPrice(parseFloat(orderValue));
-
-    res.status(200).json({
-      itemCode,
-      orderValue: parseFloat(orderValue),
-      shippingCost,
-      shippingTiers: shipPrice.shippingTiers
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+// ✅ REMOVED: getShippingPrice - Use /delivery/calculate API instead (direct model approach)
 
 // ========================================
 // PROMO CONTROLLERS
@@ -818,8 +697,8 @@ export const getInventoryStats = async (req, res, next) => {
     }
 
     const totalItems = await Inventory.countDocuments(filter);
-    const totalPrices = await InventoryPrice.countDocuments(filter);
-    const totalShipPrices = await InventoryShipPrice.countDocuments(filter);
+    const totalPrices = await Inventory.countDocuments({ ...filter, 'pricing.unitPrice': { $gt: 0 } });
+    const totalShipPrices = await Inventory.countDocuments({ ...filter, 'shipping.price0to50k': { $gt: 0 } });
     const activePromos = await Promo.countDocuments({
       isActive: true,
       startDate: { $lte: new Date() },
@@ -851,57 +730,9 @@ export const getInventoryStats = async (req, res, next) => {
 // SINGLE ITEM DATA CONTROLLERS (FOR EDIT MODAL)
 // ========================================
 
-// Get pricing data for a single inventory item
-export const getSingleItemPrice = async (req, res, next) => {
-  try {
-    const { id } = req.params;
+// ✅ REMOVED: getSingleItemPrice - Use /inventory/pricing/:itemId API instead (direct model approach)
 
-    // Find pricing data for this specific item
-    const pricing = await InventoryPrice.findOne({ itemCode: id })
-      .populate('itemCode', 'itemDescription category subCategory')
-      .populate('vendorId', 'name email');
-
-    if (!pricing) {
-      return res.status(404).json({
-        message: 'No pricing data found for this inventory item',
-        pricing: null
-      });
-    }
-
-    res.json({
-      message: 'Pricing data retrieved successfully',
-      pricing
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// Get shipping data for a single inventory item
-export const getSingleItemShipping = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-
-    // Find shipping data for this specific item
-    const shipping = await InventoryShipPrice.findOne({ itemCode: id })
-      .populate('itemCode', 'itemDescription category subCategory')
-      .populate('vendorId', 'name email');
-
-    if (!shipping) {
-      return res.status(404).json({
-        message: 'No shipping data found for this inventory item',
-        shipping: null
-      });
-    }
-
-    res.json({
-      message: 'Shipping data retrieved successfully',
-      shipping
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+// ✅ REMOVED: getSingleItemShipping - Use /inventory/pricing/:itemId API instead (direct model approach)
 
 // Get promo data for a single inventory item
 export const getSingleItemPromos = async (req, res, next) => {

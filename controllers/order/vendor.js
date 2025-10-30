@@ -77,11 +77,34 @@ export const getVendorOrderDetails = async (req, res) => {
     // Get delivery information
     const deliveryInfo = await OrderDelivery.findByOrder(leadId);
 
+    // Shape delivery info to include new fleet fields
+    const delivery = deliveryInfo ? {
+      leadId: deliveryInfo.leadId,
+      deliveryStatus: deliveryInfo.deliveryStatus,
+      deliveryNotes: deliveryInfo.deliveryNotes,
+      trackingNumber: deliveryInfo.trackingNumber,
+      courierService: deliveryInfo.courierService,
+      trackingUrl: deliveryInfo.trackingUrl,
+      address: deliveryInfo.address,
+      pincode: deliveryInfo.pincode,
+      deliveryExpectedDate: deliveryInfo.deliveryExpectedDate,
+      deliveryActualDate: deliveryInfo.deliveryActualDate,
+      driverName: deliveryInfo.driverName,
+      driverPhone: deliveryInfo.driverPhone,
+      driverLicenseNo: deliveryInfo.driverLicenseNo,
+      truckNumber: deliveryInfo.truckNumber,
+      vehicleType: deliveryInfo.vehicleType,
+      capacityTons: deliveryInfo.capacityTons,
+      startTime: deliveryInfo.startTime,
+      estimatedArrival: deliveryInfo.estimatedArrival,
+      lastLocation: deliveryInfo.lastLocation
+    } : null;
+
     res.status(200).json({
       message: 'Vendor order details retrieved successfully',
       order,
       statusHistory,
-      deliveryInfo
+      deliveryInfo: delivery
     });
 
   } catch (error) {
@@ -103,7 +126,7 @@ export const acceptOrder = async (req, res) => {
     const order = await Order.findOne({
       leadId,
       vendorId,
-      orderStatus: 'pending',
+      orderStatus: 'order_placed',
       isActive: true
     });
 
@@ -154,7 +177,7 @@ export const rejectOrder = async (req, res) => {
     const order = await Order.findOne({
       leadId,
       vendorId,
-      orderStatus: 'pending',
+      orderStatus: 'order_placed',
       isActive: true
     });
 
@@ -207,7 +230,13 @@ export const updateDeliveryTracking = async (req, res) => {
 
     const { leadId } = req.params;
     const vendorId = req.user.userId;
-    const { trackingNumber, courierService, trackingUrl, deliveryStatus, deliveryNotes } = req.body;
+    const {
+      // deprecated courier fields (still accepted)
+      trackingNumber, courierService, trackingUrl,
+      // new fleet fields
+      driverName, driverPhone, driverLicenseNo, truckNumber, vehicleType,
+      capacityTons, startTime, estimatedArrival, lastLocation, deliveryStatus, deliveryNotes
+    } = req.body;
 
     const order = await Order.findOne({
       leadId,
@@ -241,9 +270,11 @@ export const updateDeliveryTracking = async (req, res) => {
       await delivery.addTrackingInfo(trackingNumber, courierService, trackingUrl);
     }
 
-    if (deliveryStatus) {
-      await delivery.updateDeliveryStatus(deliveryStatus, deliveryNotes);
-    }
+    // Update fleet info (driver + truck)
+    await delivery.updateFleetInfo({
+      driverName, driverPhone, driverLicenseNo, truckNumber, vehicleType,
+      capacityTons, startTime, estimatedArrival, lastLocation, deliveryStatus, deliveryNotes
+    });
 
     // Update order status based on delivery status
     if (deliveryStatus === 'delivered') {
@@ -276,11 +307,20 @@ export const updateDeliveryTracking = async (req, res) => {
       message: 'Delivery tracking updated successfully',
       delivery: {
         leadId: delivery.leadId,
+        deliveryStatus: delivery.deliveryStatus,
+        deliveryNotes: delivery.deliveryNotes,
         trackingNumber: delivery.trackingNumber,
         courierService: delivery.courierService,
         trackingUrl: delivery.trackingUrl,
-        deliveryStatus: delivery.deliveryStatus,
-        deliveryNotes: delivery.deliveryNotes
+        driverName: delivery.driverName,
+        driverPhone: delivery.driverPhone,
+        driverLicenseNo: delivery.driverLicenseNo,
+        truckNumber: delivery.truckNumber,
+        vehicleType: delivery.vehicleType,
+        capacityTons: delivery.capacityTons,
+        startTime: delivery.startTime,
+        estimatedArrival: delivery.estimatedArrival,
+        lastLocation: delivery.lastLocation
       }
     });
 
@@ -333,7 +373,7 @@ export const getVendorOrderStats = async (req, res) => {
   }
 };
 
-// Get pending orders for vendor
+// Get pending orders for vendor (orders placed by customers, waiting for vendor response)
 export const getPendingOrders = async (req, res) => {
   try {
     const vendorId = req.user.userId;
@@ -346,7 +386,7 @@ export const getPendingOrders = async (req, res) => {
 
     const orders = await Order.find({
       vendorId,
-      orderStatus: 'pending',
+      orderStatus: 'order_placed',
       isActive: true
     })
       .populate('items.itemCode', 'itemDescription category subCategory primaryImage')
@@ -357,7 +397,7 @@ export const getPendingOrders = async (req, res) => {
 
     const totalOrders = await Order.countDocuments({
       vendorId,
-      orderStatus: 'pending',
+      orderStatus: 'order_placed',
       isActive: true
     });
 

@@ -3,8 +3,11 @@ import OrderStatus from '../../models/OrderStatus.js';
 import OrderDelivery from '../../models/OrderDelivery.js';
 import OrderPayment from '../../models/OrderPayment.js';
 import Inventory from '../../models/Inventory.js';
-import InventoryPrice from '../../models/InventoryPrice.js';
+// ✅ REMOVED: InventoryPrice import - Using direct model approach
 import { validationResult } from 'express-validator';
+import geocodingService from '../../services/geocodingService.js';
+import distanceService from '../../services/distanceService.js';
+import WarehouseService from '../../services/warehouseService.js';
 
 // Add item to cart (Create order)
 export const addToCart = async (req, res) => {
@@ -17,7 +20,7 @@ export const addToCart = async (req, res) => {
       });
     }
 
-    const { itemCode, qty } = req.body;
+    const { itemCode, qty, deliveryPincode } = req.body;
     const customerId = req.user.userId;
 
     // Get inventory item and pricing
@@ -34,49 +37,148 @@ export const addToCart = async (req, res) => {
       });
     }
 
-    const pricing = await InventoryPrice.findOne({ itemCode });
-    if (!pricing) {
+    // Use direct pricing from Inventory model (no separate pricing model needed)
+    if (!inventoryItem.pricing || !inventoryItem.pricing.unitPrice) {
       return res.status(404).json({
         message: 'Pricing not found for this item'
       });
     }
 
-    // Check if customer already has a pending order with this vendor
-    const existingOrder = await Order.findOne({
+    // Calculate delivery charges using nearest warehouse for this specific item
+    let deliveryCharges = 0;
+    let deliveryDetails = null;
+    
+    if (deliveryPincode && inventoryItem.warehouses && inventoryItem.warehouses.length > 0) {
+      try {
+        // Get customer coordinates
+        const pincodeResult = await geocodingService.validatePincode(deliveryPincode);
+        if (pincodeResult.success) {
+          const customerLocation = pincodeResult.data.location;
+          
+          // Find nearest warehouse for this specific item
+          const warehousesWithDistance = inventoryItem.warehouses
+            .filter(warehouse => warehouse.isActive)
+            .map(warehouse => {
+              const distance = distanceService.calculateDistance(
+                warehouse.location.coordinates,
+                customerLocation
+              );
+              
+              const deliveryChargeDetails = distanceService.calculateDeliveryCharges(
+                distance,
+                warehouse.deliveryConfig,
+                inventoryItem.pricing.unitPrice
+              );
+              
+              return {
+                warehouseId: warehouse.warehouseId,
+                warehouseName: warehouse.warehouseName,
+                location: warehouse.location,
+                distance: Math.round(distance * 100) / 100,
+                deliveryConfig: warehouse.deliveryConfig,
+                stock: warehouse.stock
+              };
+            })
+            .sort((a, b) => a.distance - b.distance);
+          
+          if (warehousesWithDistance.length > 0) {
+            const nearestWarehouse = warehousesWithDistance[0];
+            
+            // Get delivery charge details from the mapping (already calculated)
+            const nearestWarehouseWithCharges = inventoryItem.warehouses
+              .filter(warehouse => warehouse.isActive)
+              .map(warehouse => {
+                const distance = distanceService.calculateDistance(
+                  warehouse.location.coordinates,
+                  customerLocation
+                );
+                
+                const deliveryChargeDetails = distanceService.calculateDeliveryCharges(
+                  distance,
+                  warehouse.deliveryConfig,
+                  inventoryItem.pricing.unitPrice
+                );
+                
+                return {
+                  warehouse,
+                  distance: Math.round(distance * 100) / 100,
+                  deliveryChargeDetails
+                };
+              })
+              .sort((a, b) => a.distance - b.distance)[0];
+            
+            deliveryCharges = nearestWarehouseWithCharges.deliveryChargeDetails.totalDeliveryCharge;
+            
+            deliveryDetails = {
+              distance: nearestWarehouse.distance,
+              warehouse: nearestWarehouse.warehouseName,
+              warehouseLocation: nearestWarehouse.location,
+              warehouseId: nearestWarehouse.warehouseId,
+              deliveryConfig: nearestWarehouse.deliveryConfig,
+              availableWarehouses: warehousesWithDistance.length,
+              isDeliveryAvailable: nearestWarehouseWithCharges.deliveryChargeDetails.isDeliveryAvailable,
+              deliveryReason: nearestWarehouseWithCharges.deliveryChargeDetails.reason
+            };
+            
+            console.log(`✅ Found nearest warehouse for item: ${nearestWarehouse.warehouseName} (${nearestWarehouse.distance}km)`);
+          } else {
+            console.log(`❌ No active warehouses found for this item in pincode ${deliveryPincode}`);
+            deliveryDetails = {
+              message: 'No active warehouses available for this item in your area',
+              deliveryConfig: {}
+            };
+          }
+        } else {
+          console.log(`❌ Invalid pincode: ${deliveryPincode}`);
+          deliveryDetails = {
+            message: 'Invalid pincode provided',
+            deliveryConfig: {}
+          };
+        }
+      } catch (error) {
+        console.log('Delivery calculation failed:', error.message);
+        deliveryDetails = {
+          message: 'Delivery calculation failed',
+          deliveryConfig: {}
+        };
+      }
+    } else if (deliveryPincode) {
+      deliveryDetails = {
+        message: 'No warehouses configured for this item',
+        deliveryConfig: {}
+      };
+    }
+
+    // Always create a new order for each addToCart call
+    const itemTotalCost = qty * inventoryItem.pricing.unitPrice;
+    const totalAmount = itemTotalCost + deliveryCharges;
+    
+    const orderItems = [{
+      itemCode,
+      qty,
+      unitPrice: inventoryItem.pricing.unitPrice,
+      totalCost: itemTotalCost
+    }];
+    
+    // Generate custom lead ID with category prefix
+    const leadId = await Order.generateLeadId(orderItems);
+    
+    const order = new Order({
+      leadId,
       custUserId: customerId,
       vendorId: inventoryItem.vendorId,
-      orderStatus: 'pending',
-      isActive: true
+      items: orderItems,
+      totalQty: qty,
+      totalAmount: totalAmount,
+      deliveryCharges: deliveryCharges,
+      deliveryAddress: req.body.deliveryAddress || 'Address to be updated',
+      deliveryPincode: deliveryPincode || '000000',
+      deliveryExpectedDate: req.body.deliveryExpectedDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+      custPhoneNum: req.body.custPhoneNum || req.user.phone || '0000000000',
+      receiverMobileNum: req.body.receiverMobileNum || req.user.phone || '0000000000'
     });
 
-    let order;
-
-    if (existingOrder) {
-      // Add item to existing order
-      order = await existingOrder.addItem(itemCode, qty, pricing.unitPrice);
-    } else {
-      // Create new order
-      const itemTotalCost = qty * pricing.unitPrice;
-      order = new Order({
-        custUserId: customerId,
-        vendorId: inventoryItem.vendorId,
-        items: [{
-          itemCode,
-          qty,
-          unitPrice: pricing.unitPrice,
-          totalCost: itemTotalCost
-        }],
-        totalQty: qty,
-        totalAmount: itemTotalCost,
-        deliveryAddress: req.body.deliveryAddress || 'Address to be updated',
-        deliveryPincode: req.body.deliveryPincode || '000000',
-        deliveryExpectedDate: req.body.deliveryExpectedDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
-        custPhoneNum: req.body.custPhoneNum || req.user.phone || '0000000000',
-        receiverMobileNum: req.body.receiverMobileNum || req.user.phone || '0000000000'
-      });
-
-      await order.save();
-    }
+    await order.save();
 
     // Create initial status
     await OrderStatus.createStatusUpdate(
@@ -103,6 +205,8 @@ export const addToCart = async (req, res) => {
         items: order.items,
         totalQty: order.totalQty,
         totalAmount: order.totalAmount,
+        deliveryCharges: order.deliveryCharges,
+        deliveryDetails: deliveryDetails,
         orderStatus: order.orderStatus,
         vendorId: order.vendorId,
         orderDate: order.orderDate,
@@ -196,11 +300,27 @@ export const getOrderDetails = async (req, res) => {
     // Get payment information
     const paymentInfo = await OrderPayment.findByInvoice(order.invcNum);
 
+    // Build masked delivery view for customers
+    const delivery = deliveryInfo ? {
+      deliveryStatus: deliveryInfo.deliveryStatus,
+      driverName: deliveryInfo.driverName || null,
+      driverPhone: deliveryInfo.driverPhone || null,
+      truckNumber: deliveryInfo.truckNumber || null,
+      vehicleType: deliveryInfo.vehicleType || null,
+      estimatedArrival: deliveryInfo.estimatedArrival || null,
+      address: deliveryInfo.address,
+      pincode: deliveryInfo.pincode,
+      lastLocation: { address: deliveryInfo.lastLocation?.address || null },
+      deliveryNotes: deliveryInfo.deliveryNotes || null,
+      expectedDeliveryDate: deliveryInfo.deliveryExpectedDate,
+      deliveredDate: deliveryInfo.deliveryActualDate
+    } : null;
+
     res.status(200).json({
       message: 'Order details retrieved successfully',
       order,
       statusHistory,
-      deliveryInfo,
+      deliveryInfo: delivery,
       paymentInfo
     });
 
@@ -226,7 +346,7 @@ export const updateOrder = async (req, res) => {
 
     const { leadId } = req.params;
     const customerId = req.user.userId;
-    const { deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum } = req.body;
+    const { items, deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum } = req.body;
 
     const order = await Order.findOne({
       leadId,
@@ -239,6 +359,26 @@ export const updateOrder = async (req, res) => {
       return res.status(404).json({
         message: 'Order not found or cannot be updated'
       });
+    }
+
+    // Update items if provided
+    if (items && Array.isArray(items)) {
+      for (const itemUpdate of items) {
+        const { itemCode, qty } = itemUpdate;
+        
+        // Find the item in the order by itemCode (MongoDB ObjectId)
+        const existingItem = order.items.find(item => item.itemCode.toString() === itemCode);
+        
+        if (existingItem) {
+          // Update quantity and recalculate total cost
+          existingItem.qty = qty;
+          existingItem.totalCost = qty * existingItem.unitPrice;
+          console.log(`Updated item ${itemCode}: qty=${qty}, totalCost=${existingItem.totalCost}`);
+        } else {
+          console.log(`Item not found: ${itemCode} in order ${leadId}`);
+          console.log('Available items:', order.items.map(item => item.itemCode.toString()));
+        }
+      }
     }
 
     // Update delivery information
@@ -322,6 +462,57 @@ export const removeFromCart = async (req, res) => {
   }
 };
 
+// Remove entire order from cart
+export const removeOrderFromCart = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const customerId = req.user.userId;
+
+    const order = await Order.findOne({
+      leadId,
+      custUserId: customerId,
+      orderStatus: 'pending',
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        message: 'Order not found or cannot be removed'
+      });
+    }
+
+    // Mark order as inactive (soft delete from cart only)
+    order.isActive = false;
+    await order.save();
+
+    // Create status update (keep original status, just mark as removed from cart)
+    await OrderStatus.createStatusUpdate(
+      order.leadId,
+      order.invcNum,
+      order.vendorId,
+      order.orderStatus, // Keep original status
+      customerId,
+      'Order removed from cart by customer'
+    );
+
+    res.status(200).json({
+      message: 'Order removed from cart successfully',
+      order: {
+        leadId: order.leadId,
+        orderStatus: order.orderStatus, // Will show original status (pending, order_placed, etc.)
+        isActive: order.isActive // Will be false (removed from cart)
+      }
+    });
+
+  } catch (error) {
+    console.error('Remove order from cart error:', error);
+    res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
 // Place order (Move from cart to placed)
 export const placeOrder = async (req, res) => {
   try {
@@ -361,6 +552,9 @@ export const placeOrder = async (req, res) => {
     order.deliveryPincode = deliveryPincode;
     order.deliveryExpectedDate = deliveryExpectedDate;
     order.receiverMobileNum = receiverMobileNum;
+    
+    // Change order status from pending to order_placed
+    order.orderStatus = 'order_placed';
 
     await order.save();
 
@@ -369,7 +563,7 @@ export const placeOrder = async (req, res) => {
       order.leadId,
       order.invcNum,
       order.vendorId,
-      'pending',
+      'order_placed',
       customerId,
       'Order placed and sent to vendor'
     );
@@ -616,13 +810,15 @@ export const getOrderTracking = async (req, res) => {
       })),
       delivery: delivery ? {
         deliveryStatus: delivery.deliveryStatus,
-        trackingNumber: delivery.trackingNumber,
-        courierService: delivery.courierService,
-        trackingUrl: delivery.trackingUrl,
-        expectedDeliveryDate: delivery.expectedDeliveryDate,
-        deliveredDate: delivery.deliveredDate,
+        driverName: delivery.driverName || null,
+        driverPhone: delivery.driverPhone || null,
+        truckNumber: delivery.truckNumber || null,
+        vehicleType: delivery.vehicleType || null,
+        estimatedArrival: delivery.estimatedArrival || null,
         address: delivery.address,
-        pincode: delivery.pincode
+        pincode: delivery.pincode,
+        lastLocation: { address: delivery.lastLocation?.address || null },
+        deliveryNotes: delivery.deliveryNotes || null
       } : null,
       payment: payment ? {
         paymentStatus: payment.paymentStatus,
@@ -675,6 +871,7 @@ function getStatusLabel(status) {
 function getStatusDescription(status) {
   const descriptions = {
     'pending': 'Your order has been placed and is waiting for vendor confirmation.',
+    'order_placed': 'Your order has been placed and is waiting for vendor confirmation.',
     'vendor_accepted': 'Vendor has accepted your order and will process it soon.',
     'payment_done': 'Payment has been received and verified.',
     'order_confirmed': 'Your order is confirmed and being prepared for dispatch.',
@@ -687,3 +884,266 @@ function getStatusDescription(status) {
   };
   return descriptions[status] || 'Order status information';
 }
+
+// Change delivery address (within same pincode, within 48 hours)
+export const changeDeliveryAddress = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const { newAddress, reason = '' } = req.body;
+    const userId = req.user.userId;
+
+    // Validate leadId parameter
+    if (!leadId || leadId === 'undefined' || leadId.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid lead ID is required in the URL parameter'
+      });
+    }
+
+    // Validate input
+    if (!newAddress || newAddress.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'New address is required'
+      });
+    }
+
+    // Find the order
+    const order = await Order.findOne({ 
+      leadId, 
+      custUserId: userId, 
+      isActive: true 
+    }).populate('custUserId', 'name email phone');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found or you do not have permission to modify this order'
+      });
+    }
+
+    // Check if order is in a modifiable status
+    const allowedStatuses = ['order_placed', 'vendor_accepted', 'payment_done'];
+    if (!allowedStatuses.includes(order.orderStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: `Address cannot be changed for orders with status: ${order.orderStatus}. Only allowed for: ${allowedStatuses.join(', ')}`
+      });
+    }
+
+    // Check 48-hour time window
+    const orderTime = new Date(order.orderDate);
+    const currentTime = new Date();
+    const timeDifference = currentTime - orderTime;
+    const hoursDifference = timeDifference / (1000 * 60 * 60);
+
+    if (hoursDifference > 48) {
+      return res.status(400).json({
+        success: false,
+        message: 'Address can only be changed within 48 hours of order placement',
+        orderPlacedAt: orderTime,
+        hoursElapsed: Math.round(hoursDifference * 100) / 100
+      });
+    }
+
+    // Store old address for history
+    const oldAddress = order.deliveryAddress;
+    const oldPincode = order.deliveryPincode;
+
+    // Update the address (keeping same pincode)
+    order.deliveryAddress = newAddress.trim();
+
+    // Add to address change history
+    order.addressChangeHistory.push({
+      oldAddress,
+      newAddress: newAddress.trim(),
+      oldPincode,
+      newPincode: oldPincode, // Same pincode
+      changedBy: 'customer',
+      reason: reason.trim()
+    });
+
+    await order.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Delivery address updated successfully',
+      order: {
+        leadId: order.leadId,
+        oldAddress,
+        newAddress: order.deliveryAddress,
+        pincode: order.deliveryPincode,
+        changedAt: new Date(),
+        reason
+      }
+    });
+
+  } catch (error) {
+    console.error('Error changing delivery address:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Change delivery date (within 48 hours)
+export const changeDeliveryDate = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const { newDeliveryDate, reason = '' } = req.body;
+    const userId = req.user.userId;
+
+    // Validate leadId parameter
+    if (!leadId || leadId === 'undefined' || leadId.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid lead ID is required in the URL parameter'
+      });
+    }
+
+    // Validate input
+    if (!newDeliveryDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'New delivery date is required'
+      });
+    }
+
+    const requestedDate = new Date(newDeliveryDate);
+    const currentDate = new Date();
+    
+    // Check if the new date is in the future
+    if (requestedDate <= currentDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Delivery date must be in the future'
+      });
+    }
+
+    // Find the order
+    const order = await Order.findOne({ 
+      leadId, 
+      custUserId: userId, 
+      isActive: true 
+    }).populate('custUserId', 'name email phone');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found or you do not have permission to modify this order'
+      });
+    }
+
+    // Check if order is in a modifiable status
+    const allowedStatuses = ['order_placed', 'vendor_accepted', 'payment_done'];
+    if (!allowedStatuses.includes(order.orderStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: `Delivery date cannot be changed for orders with status: ${order.orderStatus}. Only allowed for: ${allowedStatuses.join(', ')}`
+      });
+    }
+
+    // Check 48-hour time window
+    const orderTime = new Date(order.orderDate);
+    const currentTime = new Date();
+    const timeDifference = currentTime - orderTime;
+    const hoursDifference = timeDifference / (1000 * 60 * 60);
+
+    if (hoursDifference > 48) {
+      return res.status(400).json({
+        success: false,
+        message: 'Delivery date can only be changed within 48 hours of order placement',
+        orderPlacedAt: orderTime,
+        hoursElapsed: Math.round(hoursDifference * 100) / 100
+      });
+    }
+
+    // Store old date for history
+    const oldDate = order.deliveryExpectedDate;
+
+    // Update the delivery date
+    order.deliveryExpectedDate = requestedDate;
+
+    // Add to delivery date change history
+    order.deliveryDateChangeHistory.push({
+      oldDate,
+      newDate: requestedDate,
+      changedBy: 'customer',
+      reason: reason.trim()
+    });
+
+    await order.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Delivery date updated successfully',
+      order: {
+        leadId: order.leadId,
+        oldDeliveryDate: oldDate,
+        newDeliveryDate: order.deliveryExpectedDate,
+        changedAt: new Date(),
+        reason
+      }
+    });
+
+  } catch (error) {
+    console.error('Error changing delivery date:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Get address and delivery date change history
+export const getOrderChangeHistory = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const userId = req.user.userId;
+
+    // Find the order
+    const order = await Order.findOne({ 
+      leadId, 
+      custUserId: userId, 
+      isActive: true 
+    }).select('addressChangeHistory deliveryDateChangeHistory orderDate orderStatus');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found or you do not have permission to view this order'
+      });
+    }
+
+    // Check if changes are still allowed (within 48 hours)
+    const orderTime = new Date(order.orderDate);
+    const currentTime = new Date();
+    const timeDifference = currentTime - orderTime;
+    const hoursDifference = timeDifference / (1000 * 60 * 60);
+    const canMakeChanges = hoursDifference <= 48 && ['order_placed', 'vendor_accepted', 'payment_done'].includes(order.orderStatus);
+
+    res.status(200).json({
+      success: true,
+      order: {
+        leadId: order.leadId,
+        orderStatus: order.orderStatus,
+        orderPlacedAt: order.orderDate,
+        canMakeChanges,
+        hoursElapsed: Math.round(hoursDifference * 100) / 100,
+        addressChangeHistory: order.addressChangeHistory || [],
+        deliveryDateChangeHistory: order.deliveryDateChangeHistory || []
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting order change history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};

@@ -7,10 +7,14 @@ import {
   getOrderDetails,
   updateOrder,
   removeFromCart,
+  removeOrderFromCart,
   placeOrder,
   processPayment,
   getPaymentStatus,
-  getOrderTracking
+  getOrderTracking,
+  changeDeliveryAddress,
+  changeDeliveryDate,
+  getOrderChangeHistory
 } from '../controllers/order/customer.js';
 
 import {
@@ -179,7 +183,7 @@ router.get('/customer/orders',
   [
     query('status')
       .optional()
-      .isIn(['pending', 'vendor_accepted', 'payment_done', 'order_confirmed', 'shipped', 'delivered', 'cancelled'])
+      .isIn(['pending', 'order_placed', 'vendor_accepted', 'payment_done', 'order_confirmed', 'shipped', 'delivered', 'cancelled'])
       .withMessage('Valid status is required'),
     query('page')
       .optional()
@@ -191,6 +195,25 @@ router.get('/customer/orders',
       .withMessage('Limit must be between 1 and 100')
   ],
   getCustomerOrders
+);
+
+// Remove item from cart
+router.delete('/customer/orders/:leadId/items',
+  authenticateToken,
+  leadIdValidation,
+  [
+    body('itemCode')
+      .isMongoId()
+      .withMessage('Valid item code is required')
+  ],
+  removeFromCart
+);
+
+// Remove entire order from cart
+router.delete('/customer/orders/:leadId',
+  authenticateToken,
+  leadIdValidation,
+  removeOrderFromCart
 );
 
 // Get single order details
@@ -206,18 +229,6 @@ router.put('/customer/orders/:leadId',
   leadIdValidation,
   updateOrderValidation,
   updateOrder
-);
-
-// Remove item from cart
-router.delete('/customer/orders/:leadId/items',
-  authenticateToken,
-  leadIdValidation,
-  [
-    body('itemCode')
-      .isMongoId()
-      .withMessage('Valid item code is required')
-  ],
-  removeFromCart
 );
 
 // Place order (Move from cart to placed)
@@ -248,6 +259,49 @@ router.get('/customer/orders/:leadId/tracking',
   authenticateToken,
   leadIdValidation,
   getOrderTracking
+);
+
+// Change delivery address (within same pincode, within 48 hours)
+router.put('/customer/orders/:leadId/address',
+  authenticateToken,
+  leadIdValidation,
+  [
+    body('newAddress')
+      .notEmpty()
+      .withMessage('New address is required')
+      .isLength({ min: 10, max: 500 })
+      .withMessage('Address must be between 10 and 500 characters'),
+    body('reason')
+      .optional()
+      .isLength({ max: 200 })
+      .withMessage('Reason must be less than 200 characters')
+  ],
+  changeDeliveryAddress
+);
+
+// Change delivery date (within 48 hours)
+router.put('/customer/orders/:leadId/delivery-date',
+  authenticateToken,
+  leadIdValidation,
+  [
+    body('newDeliveryDate')
+      .notEmpty()
+      .withMessage('New delivery date is required')
+      .isISO8601()
+      .withMessage('Invalid date format'),
+    body('reason')
+      .optional()
+      .isLength({ max: 200 })
+      .withMessage('Reason must be less than 200 characters')
+  ],
+  changeDeliveryDate
+);
+
+// Get order change history
+router.get('/customer/orders/:leadId/change-history',
+  authenticateToken,
+  leadIdValidation,
+  getOrderChangeHistory
 );
 
 // ==================== VENDOR ROUTES ====================
@@ -283,7 +337,7 @@ router.get('/vendor/orders',
   [
     query('status')
       .optional()
-      .isIn(['pending', 'vendor_accepted', 'payment_done', 'order_confirmed', 'shipped', 'delivered', 'cancelled'])
+      .isIn(['pending', 'order_placed', 'vendor_accepted', 'payment_done', 'order_confirmed', 'shipped', 'delivered', 'cancelled'])
       .withMessage('Valid status is required'),
     query('page')
       .optional()
@@ -410,7 +464,7 @@ router.get('/admin/orders',
   [
     query('status')
       .optional()
-      .isIn(['pending', 'vendor_accepted', 'payment_done', 'order_confirmed', 'shipped', 'delivered', 'cancelled'])
+      .isIn(['pending', 'order_placed', 'vendor_accepted', 'payment_done', 'order_confirmed', 'shipped', 'delivered', 'cancelled'])
       .withMessage('Valid status is required'),
     query('vendorId')
       .optional()

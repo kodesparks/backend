@@ -9,7 +9,7 @@ const signup = async (req, res, next) => {
     const { 
       name, phone, email, password, address, pincode, role = 'customer',
       employeeId, aadharNumber, panCard, joiningDate, terminationDate, 
-      employeeType, companyName, createdBy 
+      employeeType, companyName, warehouse, createdBy 
     } = req.body;
     
     // Check if user already exists
@@ -61,6 +61,10 @@ const signup = async (req, res, next) => {
 
     if (role === 'vendor') {
       userData.companyName = companyName;
+      // Add warehouse data if provided
+      if (warehouse) {
+        userData.warehouse = warehouse;
+      }
     }
 
     const user = new User(userData);
@@ -281,7 +285,7 @@ const createUser = async (req, res, next) => {
     const { 
       name, phone, email, password, address, pincode, role,
       employeeId, aadharNumber, panCard, joiningDate, terminationDate, 
-      employeeType, companyName 
+      employeeType, companyName, warehouse 
     } = req.body;
     
     // Only admin can create users with specific roles
@@ -340,6 +344,10 @@ const createUser = async (req, res, next) => {
 
     if (role === 'vendor') {
       userData.companyName = companyName;
+      // Add warehouse data if provided
+      if (warehouse) {
+        userData.warehouse = warehouse;
+      }
     }
 
     const user = new User(userData);
@@ -428,8 +436,13 @@ const updateUser = async (req, res, next) => {
     const { id } = req.params;
     const updateData = req.body;
     
+    // Handle password update separately
+    if (updateData.password) {
+      const saltRounds = 12;
+      updateData.password = await bcrypt.hash(updateData.password, saltRounds);
+    }
+    
     // Remove sensitive fields that shouldn't be updated directly
-    delete updateData.password;
     delete updateData.refreshToken;
     delete updateData.createdBy;
     

@@ -48,17 +48,24 @@ const orderDeliverySchema = new mongoose.Schema({
   },
   
   // Tracking Information
-  trackingNumber: {
-    type: String,
-    default: null
-  },
-  courierService: {
-    type: String,
-    default: null
-  },
-  trackingUrl: {
-    type: String,
-    default: null
+  // Deprecated courier fields (kept for backward compatibility)
+  trackingNumber: { type: String, default: null },
+  courierService: { type: String, default: null },
+  trackingUrl: { type: String, default: null },
+
+  // In-house fleet tracking (NEW)
+  driverName: { type: String, default: null },
+  driverPhone: { type: String, default: null, match: /^[0-9+\- ]{7,15}$/ },
+  driverLicenseNo: { type: String, default: null },
+  truckNumber: { type: String, default: null },
+  vehicleType: { type: String, default: null },
+  capacityTons: { type: Number, default: null, min: 0 },
+  startTime: { type: Date, default: null },
+  estimatedArrival: { type: Date, default: null },
+  lastLocation: {
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null },
+    address: { type: String, default: null }
   },
   
   // Delivery Status
@@ -159,6 +166,28 @@ orderDeliverySchema.methods.addTrackingInfo = function(trackingNumber, courierSe
   this.updateDate = new Date();
   this.updateTime = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
   
+  return this.save();
+};
+
+// New helper to update in-house fleet details
+orderDeliverySchema.methods.updateFleetInfo = function(partial) {
+  const fields = [
+    'driverName','driverPhone','driverLicenseNo','truckNumber','vehicleType','capacityTons',
+    'startTime','estimatedArrival','deliveryNotes'
+  ];
+  for (const f of fields) {
+    if (partial[f] !== undefined) this[f] = partial[f];
+  }
+  if (partial.lastLocation) {
+    this.lastLocation = this.lastLocation || {};
+    const locFields = ['lat','lng','address'];
+    for (const lf of locFields) {
+      if (partial.lastLocation[lf] !== undefined) this.lastLocation[lf] = partial.lastLocation[lf];
+    }
+  }
+  if (partial.deliveryStatus) this.deliveryStatus = partial.deliveryStatus;
+  this.updateDate = new Date();
+  this.updateTime = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
   return this.save();
 };
 

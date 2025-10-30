@@ -90,6 +90,158 @@ const inventorySchema = new mongoose.Schema(
       default: null
     },
 
+    // Pricing Information
+    pricing: {
+      basePrice: {
+        type: Number,
+        required: false,
+        min: 0,
+        default: 0
+      },
+      unitPrice: {
+        type: Number,
+        required: false,
+        min: 0,
+        default: 0
+      },
+      currency: {
+        type: String,
+        default: 'INR',
+        enum: ['INR', 'USD', 'EUR']
+      },
+      isActive: {
+        type: Boolean,
+        default: true
+      }
+    },
+
+    // Delivery Information
+    delivery: {
+      baseCharge: {
+        type: Number,
+        required: false,
+        min: 0,
+        default: 0
+      },
+      perKmCharge: {
+        type: Number,
+        required: false,
+        min: 0,
+        default: 0
+      },
+      freeDeliveryThreshold: {
+        type: Number,
+        default: 0,
+        min: 0
+      },
+      freeDeliveryRadius: {
+        type: Number,
+        default: 0,
+        min: 0
+      }
+    },
+
+    // Warehouse Information - Array of warehouses where this item is available
+    warehouses: [{
+      warehouseId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User', // Reference to vendor who owns this warehouse
+        required: true
+      },
+      warehouseName: {
+        type: String,
+        required: true,
+        trim: true
+      },
+      location: {
+        address: {
+          type: String,
+          required: true,
+          trim: true
+        },
+        city: {
+          type: String,
+          required: true,
+          trim: true
+        },
+        state: {
+          type: String,
+          required: true,
+          trim: true
+        },
+        pincode: {
+          type: String,
+          required: true,
+          trim: true
+        },
+        coordinates: {
+          latitude: {
+            type: Number,
+            required: true,
+            min: -90,
+            max: 90
+          },
+          longitude: {
+            type: Number,
+            required: true,
+            min: -180,
+            max: 180
+          }
+        }
+      },
+      deliveryConfig: {
+        baseDeliveryCharge: {
+          type: Number,
+          required: true,
+          min: 0,
+          default: 0
+        },
+        perKmCharge: {
+          type: Number,
+          required: true,
+          min: 0,
+          default: 0
+        },
+        minimumOrder: {
+          type: Number,
+          required: true,
+          min: 0,
+          default: 0
+        },
+        freeDeliveryThreshold: {
+          type: Number,
+          default: 0,
+          min: 0
+        },
+        freeDeliveryRadius: {
+          type: Number,
+          default: 0,
+          min: 0
+        },
+        maxDeliveryRadius: {
+          type: Number,
+          default: 500,
+          min: 0
+        }
+      },
+      stock: {
+        available: {
+          type: Number,
+          default: 0,
+          min: 0
+        },
+        reserved: {
+          type: Number,
+          default: 0,
+          min: 0
+        }
+      },
+      isActive: {
+        type: Boolean,
+        default: true
+      }
+    }],
+
     // Relationships
     vendorId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -148,7 +300,7 @@ inventorySchema.pre('save', function(next) {
 });
 
 // Indexes for better performance
-inventorySchema.index({ itemCode: 1 });
+// itemCode index is automatically created due to unique: true
 inventorySchema.index({ vendorId: 1, isActive: 1 });
 inventorySchema.index({ category: 1, subCategory: 1 });
 inventorySchema.index({ createdBy: 1 });

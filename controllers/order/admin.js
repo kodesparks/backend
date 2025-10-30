@@ -81,11 +81,33 @@ export const getOrderDetails = async (req, res) => {
     // Get payment information
     const paymentInfo = await OrderPayment.findByInvoice(order.invcNum);
 
+    const delivery = deliveryInfo ? {
+      leadId: deliveryInfo.leadId,
+      deliveryStatus: deliveryInfo.deliveryStatus,
+      deliveryNotes: deliveryInfo.deliveryNotes,
+      trackingNumber: deliveryInfo.trackingNumber,
+      courierService: deliveryInfo.courierService,
+      trackingUrl: deliveryInfo.trackingUrl,
+      address: deliveryInfo.address,
+      pincode: deliveryInfo.pincode,
+      deliveryExpectedDate: deliveryInfo.deliveryExpectedDate,
+      deliveryActualDate: deliveryInfo.deliveryActualDate,
+      driverName: deliveryInfo.driverName,
+      driverPhone: deliveryInfo.driverPhone,
+      driverLicenseNo: deliveryInfo.driverLicenseNo,
+      truckNumber: deliveryInfo.truckNumber,
+      vehicleType: deliveryInfo.vehicleType,
+      capacityTons: deliveryInfo.capacityTons,
+      startTime: deliveryInfo.startTime,
+      estimatedArrival: deliveryInfo.estimatedArrival,
+      lastLocation: deliveryInfo.lastLocation
+    } : null;
+
     res.status(200).json({
       message: 'Order details retrieved successfully',
       order,
       statusHistory,
-      deliveryInfo,
+      deliveryInfo: delivery,
       paymentInfo
     });
 
@@ -275,7 +297,7 @@ export const cancelOrder = async (req, res) => {
   try {
     const { leadId } = req.params;
     const adminId = req.user.userId;
-    const { reason } = req.body;
+    const { reason = '' } = req.body || {};
 
     const order = await Order.findOne({
       leadId,
@@ -548,7 +570,7 @@ export const confirmOrder = async (req, res) => {
   try {
     const { leadId } = req.params;
     const adminId = req.user.userId;
-    const { remarks } = req.body;
+    const { remarks = '' } = req.body || {};
 
     // Find the order
     const order = await Order.findOne({
@@ -605,7 +627,7 @@ export const updateOrderStatus = async (req, res) => {
   try {
     const { leadId } = req.params;
     const adminId = req.user.userId;
-    const { orderStatus, remarks } = req.body;
+    const { orderStatus, remarks = '' } = req.body || {};
 
     if (!orderStatus) {
       return res.status(400).json({
@@ -752,11 +774,14 @@ export const updateDelivery = async (req, res) => {
   try {
     const { leadId } = req.params;
     const { 
-      deliveryStatus, 
-      trackingNumber, 
-      courierService, 
+      deliveryStatus,
+      trackingNumber,
+      courierService,
       expectedDeliveryDate,
-      remarks 
+      remarks,
+      // new fleet fields
+      driverName, driverPhone, driverLicenseNo, truckNumber, vehicleType,
+      capacityTons, startTime, estimatedArrival, lastLocation, deliveryNotes
     } = req.body;
 
     const order = await Order.findOne({ leadId, isActive: true });
@@ -781,15 +806,23 @@ export const updateDelivery = async (req, res) => {
         deliveryStatus: deliveryStatus || 'pending',
         trackingNumber,
         courierService,
-        expectedDeliveryDate
+        expectedDeliveryDate,
+        driverName, driverPhone, driverLicenseNo, truckNumber, vehicleType,
+        capacityTons, startTime, estimatedArrival,
+        lastLocation: lastLocation || undefined,
+        deliveryNotes
       });
     } else {
       // Update existing delivery
-      if (deliveryStatus) delivery.deliveryStatus = deliveryStatus;
-      if (trackingNumber) delivery.trackingNumber = trackingNumber;
-      if (courierService) delivery.courierService = courierService;
-      if (expectedDeliveryDate) delivery.expectedDeliveryDate = expectedDeliveryDate;
-      await delivery.save();
+      if (trackingNumber || courierService || expectedDeliveryDate) {
+        if (trackingNumber) delivery.trackingNumber = trackingNumber;
+        if (courierService) delivery.courierService = courierService;
+        if (expectedDeliveryDate) delivery.expectedDeliveryDate = expectedDeliveryDate;
+      }
+      await delivery.updateFleetInfo({
+        driverName, driverPhone, driverLicenseNo, truckNumber, vehicleType,
+        capacityTons, startTime, estimatedArrival, lastLocation, deliveryStatus, deliveryNotes
+      });
     }
 
     res.status(200).json({
@@ -838,7 +871,7 @@ export const markDelivered = async (req, res) => {
   try {
     const { leadId } = req.params;
     const adminId = req.user.userId;
-    const { deliveredDate = new Date(), receivedBy, remarks } = req.body;
+    const { deliveredDate = new Date(), receivedBy = '', remarks = '' } = req.body || {};
 
     const order = await Order.findOne({ leadId, isActive: true });
     
