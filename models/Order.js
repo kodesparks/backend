@@ -304,7 +304,7 @@ orderSchema.statics.findByStatus = function(status, options = {}) {
     .skip(options.skip || 0);
 };
 
-// Static method to generate custom lead ID with category prefix
+// Static method to generate custom lead ID with category prefix and sequential numbering
 orderSchema.statics.generateLeadId = async function(items) {
   try {
     // Get categories from items
@@ -317,50 +317,77 @@ orderSchema.statics.generateLeadId = async function(items) {
       }
     }
     
-    // Determine category prefix
-    let categoryPrefix = 'ORDER'; // Default prefix
+    // Determine category prefix based on new format
+    let categoryPrefix = 'OR'; // Default prefix
+    let paddingLength = 3; // Default padding (3 digits)
     
     if (categories.size === 1) {
       // Single category - use specific prefix
-      const category = Array.from(categories)[0];
-      switch (category.toLowerCase()) {
+      const category = Array.from(categories)[0].toLowerCase();
+      switch (category) {
         case 'cement':
-          categoryPrefix = 'CEMENT';
+          categoryPrefix = 'CT';
+          paddingLength = 3;
           break;
         case 'iron':
-          categoryPrefix = 'STEEL';
+        case 'steel':
+          categoryPrefix = 'ST';
+          paddingLength = 3;
           break;
         case 'concrete mixer':
-          categoryPrefix = 'MIXER';
+          categoryPrefix = 'CM';
+          paddingLength = 4;
+          break;
+        case 'bricks':
+          categoryPrefix = 'BK';
+          paddingLength = 4;
           break;
         default:
-          categoryPrefix = 'ORDER';
+          categoryPrefix = 'OR';
+          paddingLength = 3;
       }
     } else if (categories.size > 1) {
       // Multiple categories - use MIXED prefix
-      categoryPrefix = 'MIXED';
+      categoryPrefix = 'MX';
+      paddingLength = 3;
     }
     
-    // Generate unique ID
-    const timestamp = Date.now().toString(36);
-    const randomId = Math.random().toString(36).substr(2, 8);
-    const leadId = `${categoryPrefix}-${timestamp}${randomId}`.toUpperCase();
+    // Find the last order with the same prefix to get the next sequential number
+    const regex = new RegExp(`^${categoryPrefix}-(\\d+)$`, 'i');
+    const lastOrder = await this.findOne({
+      leadId: { $regex: regex }
+    }).sort({ leadId: -1 });
     
-    // Ensure uniqueness
+    let nextNumber = 1;
+    
+    if (lastOrder) {
+      // Extract number from last order's leadId
+      const match = lastOrder.leadId.match(regex);
+      if (match && match[1]) {
+        const lastNumber = parseInt(match[1], 10);
+        nextNumber = lastNumber + 1;
+      }
+    }
+    
+    // Format with padding (e.g., CT-022, ST-838, CM-4838, BK-3838)
+    const paddedNumber = nextNumber.toString().padStart(paddingLength, '0');
+    const leadId = `${categoryPrefix}-${paddedNumber}`;
+    
+    // Ensure uniqueness (double-check)
     const existingOrder = await this.findOne({ leadId });
     if (existingOrder) {
-      // If collision, add more randomness
-      const extraRandom = Math.random().toString(36).substr(2, 4);
-      return `${categoryPrefix}-${timestamp}${randomId}${extraRandom}`.toUpperCase();
+      // If collision, try next number
+      nextNumber += 1;
+      const paddedNumber = nextNumber.toString().padStart(paddingLength, '0');
+      return `${categoryPrefix}-${paddedNumber}`;
     }
     
     return leadId;
   } catch (error) {
     console.error('Error generating lead ID:', error);
-    // Fallback to generic ID
-    const timestamp = Date.now().toString(36);
-    const randomId = Math.random().toString(36).substr(2, 8);
-    return `ORDER-${timestamp}${randomId}`.toUpperCase();
+    // Fallback to generic ID with timestamp
+    const timestamp = Date.now();
+    return `OR-${timestamp.toString().slice(-6)}`;
   }
 };
 
