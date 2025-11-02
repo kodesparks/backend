@@ -46,7 +46,7 @@ const ROLE_ACCESS_LEVELS = {
     ],
     requiredFields: [
       'name', 'employeeId', 'phone', 'email', 'address', 'pincode',
-      'aadharNumber', 'panCard', 'joiningDate', 'terminationDate', 
+      'aadharNumber', 'panCard', 'joiningDate', 
       'employeeType', 'companyName'
     ]
   },
