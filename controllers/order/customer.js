@@ -55,76 +55,38 @@ export const addToCart = async (req, res) => {
         if (pincodeResult.success) {
           const customerLocation = pincodeResult.data.location;
           
-          // Find nearest warehouse for this specific item
-          const warehousesWithDistance = inventoryItem.warehouses
-            .filter(warehouse => warehouse.isActive)
-            .map(warehouse => {
-              const distance = distanceService.calculateDistance(
-                warehouse.location.coordinates,
-                customerLocation
-              );
-              
-              const deliveryChargeDetails = distanceService.calculateDeliveryCharges(
-                distance,
-                warehouse.deliveryConfig,
-                inventoryItem.pricing.unitPrice
-              );
-              
-              return {
-                warehouseId: warehouse.warehouseId,
-                warehouseName: warehouse.warehouseName,
-                location: warehouse.location,
-                distance: Math.round(distance * 100) / 100,
-                deliveryConfig: warehouse.deliveryConfig,
-                stock: warehouse.stock
-              };
-            })
-            .sort((a, b) => a.distance - b.distance);
+          // Get the assigned warehouse (one per product, assigned by admin)
+          const assignedWarehouse = inventoryItem.warehouses.find(wh => wh.isActive) || inventoryItem.warehouses[0];
           
-          if (warehousesWithDistance.length > 0) {
-            const nearestWarehouse = warehousesWithDistance[0];
+          if (assignedWarehouse && assignedWarehouse.location?.coordinates) {
+            const distance = distanceService.calculateDistance(
+              assignedWarehouse.location.coordinates,
+              customerLocation
+            );
             
-            // Get delivery charge details from the mapping (already calculated)
-            const nearestWarehouseWithCharges = inventoryItem.warehouses
-              .filter(warehouse => warehouse.isActive)
-              .map(warehouse => {
-                const distance = distanceService.calculateDistance(
-                  warehouse.location.coordinates,
-                  customerLocation
-                );
-                
-                const deliveryChargeDetails = distanceService.calculateDeliveryCharges(
-                  distance,
-                  warehouse.deliveryConfig,
-                  inventoryItem.pricing.unitPrice
-                );
-                
-                return {
-                  warehouse,
-                  distance: Math.round(distance * 100) / 100,
-                  deliveryChargeDetails
-                };
-              })
-              .sort((a, b) => a.distance - b.distance)[0];
+            const deliveryChargeDetails = distanceService.calculateDeliveryCharges(
+              distance,
+              assignedWarehouse.deliveryConfig,
+              inventoryItem.pricing.unitPrice
+            );
             
-            deliveryCharges = nearestWarehouseWithCharges.deliveryChargeDetails.totalDeliveryCharge;
+            deliveryCharges = deliveryChargeDetails.totalDeliveryCharge;
             
             deliveryDetails = {
-              distance: nearestWarehouse.distance,
-              warehouse: nearestWarehouse.warehouseName,
-              warehouseLocation: nearestWarehouse.location,
-              warehouseId: nearestWarehouse.warehouseId,
-              deliveryConfig: nearestWarehouse.deliveryConfig,
-              availableWarehouses: warehousesWithDistance.length,
-              isDeliveryAvailable: nearestWarehouseWithCharges.deliveryChargeDetails.isDeliveryAvailable,
-              deliveryReason: nearestWarehouseWithCharges.deliveryChargeDetails.reason
+              distance: Math.round(distance * 100) / 100,
+              warehouse: assignedWarehouse.warehouseName,
+              warehouseLocation: assignedWarehouse.location,
+              warehouseId: assignedWarehouse.warehouseId,
+              deliveryConfig: assignedWarehouse.deliveryConfig,
+              isDeliveryAvailable: deliveryChargeDetails.isDeliveryAvailable,
+              deliveryReason: deliveryChargeDetails.reason
             };
             
-            console.log(`✅ Found nearest warehouse for item: ${nearestWarehouse.warehouseName} (${nearestWarehouse.distance}km)`);
+            console.log(`✅ Using assigned warehouse for item: ${assignedWarehouse.warehouseName} (${Math.round(distance * 100) / 100}km)`);
           } else {
-            console.log(`❌ No active warehouses found for this item in pincode ${deliveryPincode}`);
+            console.log(`❌ Assigned warehouse location not found for this item`);
             deliveryDetails = {
-              message: 'No active warehouses available for this item in your area',
+              message: 'Warehouse location not configured',
               deliveryConfig: {}
             };
           }

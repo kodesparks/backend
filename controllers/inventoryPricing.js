@@ -94,97 +94,59 @@ export const getInventoryWithPricing = async (req, res) => {
           }
         };
 
-        // Process warehouses for this item
+        // Process warehouse for this item (ONE warehouse per product, assigned by admin)
         if (item.warehouses && item.warehouses.length > 0) {
-          // Calculate distances and delivery charges for all warehouses
-          // Calculate distances for sorting but keep warehouse objects clean
-          const warehousesWithDistance = item.warehouses
-            .filter(warehouse => warehouse.isActive)
-            .map(warehouse => {
-              let distance = 0;
-              let deliveryCharge = 0;
-              let deliveryTime = 'Not available';
-              let deliveryChargeDetails = {
-                isDeliveryAvailable: true,
-                reason: null
-              };
-              
-              if (destinationCoord) {
-                // Calculate distance from customer to warehouse
-                distance = distanceService.calculateDistance(
-                  warehouse.location.coordinates,
-                  destinationCoord
-                );
-                
-                // Calculate delivery charges
-                deliveryChargeDetails = distanceService.calculateDeliveryCharges(
-                  distance,
-                  warehouse.deliveryConfig,
-                  item.pricing?.unitPrice || 0
-                );
-                
-                deliveryCharge = deliveryChargeDetails.totalDeliveryCharge;
-                deliveryTime = distanceService.estimateDeliveryTime(distance).deliveryTime;
-              }
-              
-              return {
-                warehouse,
-                distance: Math.round(distance * 100) / 100,
-                deliveryCharge,
-                deliveryTime,
-                isFreeDelivery: deliveryCharge === 0,
-                isDeliveryAvailable: deliveryChargeDetails.isDeliveryAvailable !== false,
-                deliveryReason: deliveryChargeDetails.reason,
-                totalPrice: (item.pricing?.unitPrice || 0) + deliveryCharge
-              };
-            })
-            .sort((a, b) => a.distance - b.distance); // Sort by distance (nearest first)
+          // Get the first/only warehouse (admin assigns one warehouse per product)
+          const assignedWarehouse = item.warehouses.find(wh => wh.isActive) || item.warehouses[0];
           
-          // Extract clean warehouse objects (keep totalPrice and distance, remove other calculated fields)
-          const warehousesWithPricing = warehousesWithDistance.map(item => ({
-            warehouseId: item.warehouse.warehouseId,
-            warehouseName: item.warehouse.warehouseName,
-            location: item.warehouse.location,
-            distance: item.distance,
-            deliveryConfig: item.warehouse.deliveryConfig,
-            stock: item.warehouse.stock,
-            isActive: item.warehouse.isActive,
-            isDeliveryAvailable: item.isDeliveryAvailable,
-            deliveryReason: item.deliveryReason,
-            totalPrice: item.totalPrice
-          }));
+          let distance = 0;
+          let deliveryCharge = 0;
+          let deliveryChargeDetails = {
+            isDeliveryAvailable: true,
+            reason: null
+          };
           
-          if (warehousesWithPricing.length > 0) {
-            const nearestWarehouseData = warehousesWithDistance[0]; // Get the calculated data
-            const nearestWarehouse = warehousesWithPricing[0]; // Get the clean warehouse object
+          // Calculate distance and delivery charges only if pincode provided
+          if (destinationCoord && assignedWarehouse.location?.coordinates) {
+            distance = distanceService.calculateDistance(
+              assignedWarehouse.location.coordinates,
+              destinationCoord
+            );
             
-            // Use warehouse's deliveryConfig directly instead of separate delivery object
-            baseItem.warehouses = warehousesWithPricing;
-            baseItem.nearestWarehouse = nearestWarehouse;
-            baseItem.totalPrice = nearestWarehouseData.totalPrice;
+            deliveryChargeDetails = distanceService.calculateDeliveryCharges(
+              distance,
+              assignedWarehouse.deliveryConfig,
+              item.pricing?.unitPrice || 0
+            );
             
-            // Add warehouse info at root level for easier frontend access
-            baseItem.warehouseName = nearestWarehouse.warehouseName;
-            baseItem.distance = nearestWarehouseData.distance;
-            baseItem.deliveryConfig = nearestWarehouse.deliveryConfig;
-            baseItem.stock = nearestWarehouse.stock;
-            baseItem.isDeliveryAvailable = nearestWarehouseData.isDeliveryAvailable;
-            baseItem.deliveryReason = nearestWarehouseData.deliveryReason;
-          } else {
-            baseItem.warehouses = [];
-            baseItem.nearestWarehouse = null;
-            baseItem.totalPrice = item.pricing?.unitPrice || 0;
-            
-            // Add default values at root level
-            baseItem.warehouseName = 'No Warehouse Available';
-            baseItem.distance = 0;
-            baseItem.deliveryConfig = {};
-            baseItem.stock = {};
+            deliveryCharge = deliveryChargeDetails.totalDeliveryCharge;
           }
+          
+          // Return single warehouse object (not array)
+          baseItem.warehouse = {
+            warehouseId: assignedWarehouse.warehouseId,
+            warehouseName: assignedWarehouse.warehouseName,
+            location: assignedWarehouse.location,
+            distance: Math.round(distance * 100) / 100,
+            deliveryConfig: assignedWarehouse.deliveryConfig,
+            stock: assignedWarehouse.stock,
+            isActive: assignedWarehouse.isActive,
+            isDeliveryAvailable: deliveryChargeDetails.isDeliveryAvailable !== false,
+            deliveryReason: deliveryChargeDetails.reason,
+            totalPrice: (item.pricing?.unitPrice || 0) + deliveryCharge
+          };
+          
+          // Add warehouse info at root level for easier frontend access
+          baseItem.warehouseName = assignedWarehouse.warehouseName;
+          baseItem.distance = Math.round(distance * 100) / 100;
+          baseItem.deliveryConfig = assignedWarehouse.deliveryConfig;
+          baseItem.stock = assignedWarehouse.stock;
+          baseItem.isDeliveryAvailable = deliveryChargeDetails.isDeliveryAvailable !== false;
+          baseItem.deliveryReason = deliveryChargeDetails.reason;
+          baseItem.totalPrice = (item.pricing?.unitPrice || 0) + deliveryCharge;
         } else {
-          // No warehouses configured for this item
-          baseItem.warehouses = [];
-          baseItem.nearestWarehouse = null;
+          // No warehouse configured for this item
+          baseItem.warehouse = null;
           baseItem.totalPrice = item.pricing?.unitPrice || 0;
           
           // Add default values at root level
@@ -192,6 +154,8 @@ export const getInventoryWithPricing = async (req, res) => {
           baseItem.distance = 0;
           baseItem.deliveryConfig = {};
           baseItem.stock = {};
+          baseItem.isDeliveryAvailable = false;
+          baseItem.deliveryReason = 'No warehouse assigned';
         }
 
         return baseItem;
