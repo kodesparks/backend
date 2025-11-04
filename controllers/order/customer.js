@@ -55,18 +55,31 @@ export const addToCart = async (req, res) => {
         if (pincodeResult.success) {
           const customerLocation = pincodeResult.data.location;
           
-          // Get the assigned warehouse (one per product, assigned by admin)
-          const assignedWarehouse = inventoryItem.warehouses.find(wh => wh.isActive) || inventoryItem.warehouses[0];
+          // Find nearest warehouse by calculating distance to all warehouses
+          let nearestWarehouse = null;
+          let minDistance = Infinity;
+          let distance = 0;
           
-          if (assignedWarehouse && assignedWarehouse.location?.coordinates) {
-            const distance = distanceService.calculateDistance(
-              assignedWarehouse.location.coordinates,
-              customerLocation
-            );
-            
+          for (const warehouse of inventoryItem.warehouses) {
+            if (warehouse.isActive && warehouse.location?.coordinates) {
+              const warehouseDistance = distanceService.calculateDistance(
+                warehouse.location.coordinates,
+                customerLocation
+              );
+              
+              // Track nearest warehouse
+              if (warehouseDistance < minDistance) {
+                minDistance = warehouseDistance;
+                nearestWarehouse = warehouse;
+                distance = warehouseDistance;
+              }
+            }
+          }
+          
+          if (nearestWarehouse) {
             const deliveryChargeDetails = distanceService.calculateDeliveryCharges(
               distance,
-              assignedWarehouse.deliveryConfig,
+              nearestWarehouse.deliveryConfig,
               inventoryItem.pricing.unitPrice
             );
             
@@ -74,19 +87,19 @@ export const addToCart = async (req, res) => {
             
             deliveryDetails = {
               distance: Math.round(distance * 100) / 100,
-              warehouse: assignedWarehouse.warehouseName,
-              warehouseLocation: assignedWarehouse.location,
-              warehouseId: assignedWarehouse.warehouseId,
-              deliveryConfig: assignedWarehouse.deliveryConfig,
+              warehouse: nearestWarehouse.warehouseName,
+              warehouseLocation: nearestWarehouse.location,
+              warehouseId: nearestWarehouse.warehouseId,
+              deliveryConfig: nearestWarehouse.deliveryConfig,
               isDeliveryAvailable: deliveryChargeDetails.isDeliveryAvailable,
               deliveryReason: deliveryChargeDetails.reason
             };
             
-            console.log(`✅ Using assigned warehouse for item: ${assignedWarehouse.warehouseName} (${Math.round(distance * 100) / 100}km)`);
+            console.log(`✅ Using nearest warehouse for item: ${nearestWarehouse.warehouseName} (${Math.round(distance * 100) / 100}km)`);
           } else {
-            console.log(`❌ Assigned warehouse location not found for this item`);
+            console.log(`❌ No active warehouse with location found for this item`);
             deliveryDetails = {
-              message: 'Warehouse location not configured',
+              message: 'No active warehouse available',
               deliveryConfig: {}
             };
           }

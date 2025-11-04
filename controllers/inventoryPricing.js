@@ -94,11 +94,10 @@ export const getInventoryWithPricing = async (req, res) => {
           }
         };
 
-        // Process warehouse for this item (ONE warehouse per product, assigned by admin)
+        // Process warehouses for this item - find nearest warehouse to customer
         if (item.warehouses && item.warehouses.length > 0) {
-          // Get the first/only warehouse (admin assigns one warehouse per product)
-          const assignedWarehouse = item.warehouses.find(wh => wh.isActive) || item.warehouses[0];
-          
+          let nearestWarehouse = null;
+          let minDistance = Infinity;
           let distance = 0;
           let deliveryCharge = 0;
           let deliveryChargeDetails = {
@@ -106,44 +105,74 @@ export const getInventoryWithPricing = async (req, res) => {
             reason: null
           };
           
-          // Calculate distance and delivery charges only if pincode provided
-          if (destinationCoord && assignedWarehouse.location?.coordinates) {
-            distance = distanceService.calculateDistance(
-              assignedWarehouse.location.coordinates,
-              destinationCoord
-            );
+          // Calculate distance from customer pincode to ALL warehouses for this item
+          if (destinationCoord) {
+            // Find nearest warehouse by calculating distance to each
+            for (const warehouse of item.warehouses) {
+              if (warehouse.isActive && warehouse.location?.coordinates) {
+                const warehouseDistance = distanceService.calculateDistance(
+                  warehouse.location.coordinates,
+                  destinationCoord
+                );
+                
+                // Track nearest warehouse
+                if (warehouseDistance < minDistance) {
+                  minDistance = warehouseDistance;
+                  nearestWarehouse = warehouse;
+                  distance = warehouseDistance;
+                }
+              }
+            }
             
-            deliveryChargeDetails = distanceService.calculateDeliveryCharges(
-              distance,
-              assignedWarehouse.deliveryConfig,
-              item.pricing?.unitPrice || 0
-            );
-            
-            deliveryCharge = deliveryChargeDetails.totalDeliveryCharge;
+            // Calculate delivery charges for nearest warehouse
+            if (nearestWarehouse) {
+              deliveryChargeDetails = distanceService.calculateDeliveryCharges(
+                distance,
+                nearestWarehouse.deliveryConfig,
+                item.pricing?.unitPrice || 0
+              );
+              
+              deliveryCharge = deliveryChargeDetails.totalDeliveryCharge;
+            }
+          } else {
+            // No pincode provided - use first active warehouse or first warehouse
+            nearestWarehouse = item.warehouses.find(wh => wh.isActive) || item.warehouses[0];
           }
           
-          // Return single warehouse object (not array)
-          baseItem.warehouse = {
-            warehouseId: assignedWarehouse.warehouseId,
-            warehouseName: assignedWarehouse.warehouseName,
-            location: assignedWarehouse.location,
-            distance: Math.round(distance * 100) / 100,
-            deliveryConfig: assignedWarehouse.deliveryConfig,
-            stock: assignedWarehouse.stock,
-            isActive: assignedWarehouse.isActive,
-            isDeliveryAvailable: deliveryChargeDetails.isDeliveryAvailable !== false,
-            deliveryReason: deliveryChargeDetails.reason,
-            totalPrice: (item.pricing?.unitPrice || 0) + deliveryCharge
-          };
-          
-          // Add warehouse info at root level for easier frontend access
-          baseItem.warehouseName = assignedWarehouse.warehouseName;
-          baseItem.distance = Math.round(distance * 100) / 100;
-          baseItem.deliveryConfig = assignedWarehouse.deliveryConfig;
-          baseItem.stock = assignedWarehouse.stock;
-          baseItem.isDeliveryAvailable = deliveryChargeDetails.isDeliveryAvailable !== false;
-          baseItem.deliveryReason = deliveryChargeDetails.reason;
-          baseItem.totalPrice = (item.pricing?.unitPrice || 0) + deliveryCharge;
+          // Return nearest warehouse object
+          if (nearestWarehouse) {
+            baseItem.warehouse = {
+              warehouseId: nearestWarehouse.warehouseId,
+              warehouseName: nearestWarehouse.warehouseName,
+              location: nearestWarehouse.location,
+              distance: Math.round(distance * 100) / 100,
+              deliveryConfig: nearestWarehouse.deliveryConfig,
+              stock: nearestWarehouse.stock,
+              isActive: nearestWarehouse.isActive,
+              isDeliveryAvailable: deliveryChargeDetails.isDeliveryAvailable !== false,
+              deliveryReason: deliveryChargeDetails.reason,
+              totalPrice: (item.pricing?.unitPrice || 0) + deliveryCharge
+            };
+            
+            // Add warehouse info at root level for easier frontend access
+            baseItem.warehouseName = nearestWarehouse.warehouseName;
+            baseItem.distance = Math.round(distance * 100) / 100;
+            baseItem.deliveryConfig = nearestWarehouse.deliveryConfig;
+            baseItem.stock = nearestWarehouse.stock;
+            baseItem.isDeliveryAvailable = deliveryChargeDetails.isDeliveryAvailable !== false;
+            baseItem.deliveryReason = deliveryChargeDetails.reason;
+            baseItem.totalPrice = (item.pricing?.unitPrice || 0) + deliveryCharge;
+          } else {
+            // No active warehouse found
+            baseItem.warehouse = null;
+            baseItem.totalPrice = item.pricing?.unitPrice || 0;
+            baseItem.warehouseName = 'No Warehouse Available';
+            baseItem.distance = 0;
+            baseItem.deliveryConfig = {};
+            baseItem.stock = {};
+            baseItem.isDeliveryAvailable = false;
+            baseItem.deliveryReason = 'No active warehouse available';
+          }
         } else {
           // No warehouse configured for this item
           baseItem.warehouse = null;
