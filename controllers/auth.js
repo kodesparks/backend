@@ -229,13 +229,35 @@ const refreshToken = async (req, res, next) => {
     // Verify refresh token
     const decoded = verifyRefreshToken(token);
     if (!decoded) {
-      return res.status(401).json({ message: "Invalid refresh token" });
+      return res.status(401).json({ 
+        message: "Invalid or expired refresh token",
+        error: "Token verification failed"
+      });
     }
 
     // Find user
     const user = await User.findById(decoded.userId);
-    if (!user || user.refreshToken !== token) {
-      return res.status(401).json({ message: "Invalid refresh token" });
+    if (!user) {
+      return res.status(401).json({ 
+        message: "Invalid refresh token",
+        error: "User not found"
+      });
+    }
+
+    // Check if user is active
+    if (!user.isActive) {
+      return res.status(401).json({ 
+        message: "Account is deactivated",
+        error: "User account is inactive"
+      });
+    }
+
+    // Check if stored refresh token matches
+    if (!user.refreshToken || user.refreshToken !== token) {
+      return res.status(401).json({ 
+        message: "Invalid refresh token",
+        error: "Token mismatch - user may have logged in from another device"
+      });
     }
 
     // Generate new tokens
@@ -246,10 +268,12 @@ const refreshToken = async (req, res, next) => {
     await user.save();
     
     res.status(200).json({ 
+      message: "Token refreshed successfully",
       accessToken,
       refreshToken: newRefreshToken
     });
   } catch (error) {
+    console.error('Refresh token error:', error);
     next(error);
   }
 };

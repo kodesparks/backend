@@ -30,20 +30,54 @@ connectDB().then(() => {
   initializeAdmin();
 });
 
-// Middleware
-app.use(cors({
-  origin: [
-    'https://infraxpertv1.netlify.app',
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'https://infraxpert.in',
-    'https://admin.infraxpert.in',
-    'https://vendor.infraxpert.in',
+// Middleware - CORS Configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, or same-origin requests)
+    if (!origin) {
+      return callback(null, true);
+    }
 
-  ],
-  credentials: true
-}));
+    // List of allowed origins
+    const allowedOrigins = [
+      'https://infraxpertv1.netlify.app',
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://localhost:3001',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:5174',
+      'https://infraxpert.in',
+      'https://www.infraxpert.in',
+      'https://admin.infraxpert.in',
+      'https://vendor.infraxpert.in',
+      'https://customer.infraxpert.in'
+    ];
+
+    // In development, allow localhost with any port
+    if (process.env.NODE_ENV !== 'production') {
+      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+        return callback(null, true);
+      }
+    }
+
+    // Check if origin is in allowed list
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Authorization'],
+  maxAge: 86400 // 24 hours
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Routes

@@ -48,6 +48,14 @@ export const verifyRefreshToken = (token) => {
   try {
     return jwt.verify(token, REFRESH_TOKEN_SECRET);
   } catch (error) {
+    // Log error for debugging (remove in production if needed)
+    if (error.name === 'TokenExpiredError') {
+      console.log('Refresh token expired:', error.expiredAt);
+    } else if (error.name === 'JsonWebTokenError') {
+      console.log('Invalid refresh token format:', error.message);
+    } else {
+      console.log('Refresh token verification error:', error.message);
+    }
     return null;
   }
 };
