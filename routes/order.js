@@ -8,6 +8,7 @@ import {
   updateOrder,
   removeFromCart,
   removeOrderFromCart,
+  clearCart,
   placeOrder,
   processPayment,
   getPaymentStatus,
@@ -207,6 +208,12 @@ router.delete('/customer/orders/:leadId/items',
       .withMessage('Valid item code is required')
   ],
   removeFromCart
+);
+
+// Clear entire cart (remove all pending orders) - Must be before /:leadId route
+router.delete('/customer/orders/clear',
+  authenticateToken,
+  clearCart
 );
 
 // Remove entire order from cart

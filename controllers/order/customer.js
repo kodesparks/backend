@@ -488,6 +488,67 @@ export const removeOrderFromCart = async (req, res) => {
   }
 };
 
+// Clear entire cart (remove all pending orders)
+export const clearCart = async (req, res) => {
+  try {
+    const customerId = req.user.userId;
+
+    // Find all pending orders for this customer
+    const pendingOrders = await Order.find({
+      custUserId: customerId,
+      orderStatus: 'pending',
+      isActive: true
+    });
+
+    if (pendingOrders.length === 0) {
+      return res.status(200).json({
+        message: 'Cart is already empty',
+        clearedCount: 0
+      });
+    }
+
+    // Mark all pending orders as inactive (soft delete)
+    const updateResult = await Order.updateMany(
+      {
+        custUserId: customerId,
+        orderStatus: 'pending',
+        isActive: true
+      },
+      {
+        isActive: false
+      }
+    );
+
+    // Create status updates for each cleared order
+    for (const order of pendingOrders) {
+      await OrderStatus.createStatusUpdate(
+        order.leadId,
+        order.invcNum,
+        order.vendorId,
+        order.orderStatus,
+        customerId,
+        'Order removed from cart (cart cleared)'
+      );
+    }
+
+    res.status(200).json({
+      message: 'Cart cleared successfully',
+      clearedCount: updateResult.modifiedCount,
+      ordersCleared: pendingOrders.map(order => ({
+        leadId: order.leadId,
+        totalAmount: order.totalAmount
+      }))
+    });
+
+  } catch (error) {
+    console.error('Clear cart error:', error);
+    res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
 // Place order (Move from cart to placed)
 export const placeOrder = async (req, res) => {
   try {
