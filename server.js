@@ -81,7 +81,14 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With', 
+    'Accept',
+    'Origin',
+    'X-CSRF-Token'
+  ],
   exposedHeaders: ['Authorization'],
   maxAge: 86400, // 24 hours
   preflightContinue: false,
@@ -90,6 +97,20 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// Middleware to log and handle forbidden headers
+app.use((req, res, next) => {
+  // Log request headers for debugging (remove sensitive data in production)
+  const forbiddenHeaders = ['access-control-allow-origin', 'access-control-allow-methods', 'access-control-allow-headers'];
+  const sentForbiddenHeaders = Object.keys(req.headers)
+    .filter(header => forbiddenHeaders.includes(header.toLowerCase()));
+  
+  if (sentForbiddenHeaders.length > 0) {
+    console.warn(`⚠️ Forbidden headers detected in request: ${sentForbiddenHeaders.join(', ')}`);
+    console.warn(`   These headers should NOT be sent by the client. They are response headers only.`);
+  }
+  next();
+});
 
 // Routes
 app.get("/",(req,res)=>{
