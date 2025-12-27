@@ -35,10 +35,21 @@ const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, Postman, or same-origin requests)
     if (!origin) {
+      console.log('✅ CORS: Allowing request with no origin');
       return callback(null, true);
     }
 
-    // List of allowed origins
+    console.log(`🔍 CORS check for origin: ${origin}`);
+
+    // In development, allow localhost with any port
+    if (process.env.NODE_ENV !== 'production') {
+      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+        console.log(`✅ CORS: Allowing localhost origin: ${origin}`);
+        return callback(null, true);
+      }
+    }
+
+    // List of specific allowed origins
     const allowedOrigins = [
       'https://infraxpertv1.netlify.app',
       'http://localhost:3000',
@@ -49,32 +60,32 @@ const corsOptions = {
       'http://127.0.0.1:5173',
       'http://127.0.0.1:5174',
       'https://infraxpert.in',
-      'https://www.infraxpert.in',
-      'https://admin.infraxpert.in',
-      'https://vendor.infraxpert.in',
-      'https://customer.infraxpert.in'
+      'https://www.infraxpert.in'
     ];
 
-    // In development, allow localhost with any port
-    if (process.env.NODE_ENV !== 'production') {
-      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-        return callback(null, true);
-      }
+    // Allow all subdomains of infraxpert.in (for admin, vendor, customer portals)
+    if (origin.endsWith('.infraxpert.in') || origin === 'https://infraxpert.in' || origin === 'https://www.infraxpert.in') {
+      console.log(`✅ CORS: Allowing infraxpert.in subdomain: ${origin}`);
+      return callback(null, true);
     }
 
     // Check if origin is in allowed list
     if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log(`✅ CORS: Allowing origin from whitelist: ${origin}`);
       callback(null, true);
     } else {
-      console.warn(`CORS blocked origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
+      console.warn(`❌ CORS blocked origin: ${origin}`);
+      // Don't throw error, just reject silently for security
+      callback(null, false);
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   exposedHeaders: ['Authorization'],
-  maxAge: 86400 // 24 hours
+  maxAge: 86400, // 24 hours
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));
