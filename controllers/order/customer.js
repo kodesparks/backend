@@ -273,7 +273,7 @@ export const getOrderDetails = async (req, res) => {
     const deliveryInfo = await OrderDelivery.findByOrder(leadId);
 
     // Get payment information
-    const paymentInfo = await OrderPayment.findByInvoice(order.invcNum);
+    const payment = await OrderPayment.findByInvoice(order.invcNum);
 
     // Build masked delivery view for customers
     const delivery = deliveryInfo ? {
@@ -290,6 +290,29 @@ export const getOrderDetails = async (req, res) => {
       expectedDeliveryDate: deliveryInfo.deliveryExpectedDate,
       deliveredDate: deliveryInfo.deliveryActualDate
     } : null;
+
+    // Format payment information (consistent with tracking endpoint)
+    const paymentInfo = payment ? {
+      paymentStatus: payment.paymentStatus,
+      paymentMethod: payment.paymentType,
+      paidAmount: payment.paidAmount,
+      paymentDate: payment.paymentDate,
+      transactionId: payment.transactionId,
+      orderAmount: payment.orderAmount,
+      refundAmount: payment.refundAmount,
+      paymentMode: payment.paymentMode,
+      utrNum: payment.utrNum
+    } : {
+      paymentStatus: 'pending',
+      paymentMethod: null,
+      paidAmount: 0,
+      paymentDate: null,
+      transactionId: null,
+      orderAmount: order.totalAmount,
+      refundAmount: 0,
+      paymentMode: null,
+      utrNum: null
+    };
 
     res.status(200).json({
       message: 'Order details retrieved successfully',
