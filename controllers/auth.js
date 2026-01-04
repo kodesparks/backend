@@ -303,6 +303,69 @@ const logout = async (req, res, next) => {
   }
 };
 
+// Change password (requires current password verification)
+const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.userId;
+
+    // Validate input
+    if (!currentPassword) {
+      return res.status(400).json({ message: "Current password is required" });
+    }
+
+    if (!newPassword) {
+      return res.status(400).json({ message: "New password is required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ 
+        message: "New password must be at least 6 characters long" 
+      });
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(
+      currentPassword, 
+      user.password
+    );
+
+    if (!isCurrentPasswordValid) {
+      return res.status(401).json({ 
+        message: "Current password is incorrect" 
+      });
+    }
+
+    // Check if new password is same as current password
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      return res.status(400).json({ 
+        message: "New password must be different from current password" 
+      });
+    }
+
+    // Hash new password
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password
+    user.password = hashedPassword;
+    await user.save();
+
+    res.status(200).json({ 
+      message: "Password changed successfully" 
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // User Management Controllers
 const createUser = async (req, res, next) => {
   try {
@@ -594,6 +657,6 @@ const getAllRoles = async (req, res, next) => {
 };
 
 export { 
-  signup, generateOTPController, verifyOTPController, login, refreshToken, logout,
+  signup, generateOTPController, verifyOTPController, login, refreshToken, logout, changePassword,
   createUser, getAllUsers, getUserById, updateUser, deleteUser, getRoleConfig, getAllRoles
 };

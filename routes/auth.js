@@ -1,12 +1,14 @@
 import express from "express";
 import { check, validationResult } from "express-validator";
+import { authenticateToken } from "../middleware/auth.js";
 import {
   signup,
   generateOTPController,
   verifyOTPController,
   login,
   refreshToken,
-  logout
+  logout,
+  changePassword
 } from "../controllers/auth.js";
 
 const router = express.Router();
@@ -130,6 +132,22 @@ router.post(
   ],
   validate,
   verifyOTPController
+);
+
+// Change password (protected route - requires authentication)
+router.put(
+  "/change-password",
+  authenticateToken,
+  [
+    check("currentPassword")
+      .notEmpty()
+      .withMessage("Current password is required"),
+    check("newPassword")
+      .isLength({ min: 6 })
+      .withMessage("New password must be at least 6 characters long"),
+  ],
+  validate,
+  changePassword
 );
 
 export default router;
