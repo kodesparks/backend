@@ -25,7 +25,9 @@ import {
   removeImageFromInventory,
   setPrimaryImage,
   getInventoryImages,
-  getSingleItemPromos
+  getSingleItemPromos,
+  mapZohoItem,
+  getUnmappedItems
 } from '../controllers/inventory.js';
 import {
   authenticateToken,
@@ -98,7 +100,7 @@ router.post('/',
     check('category').isIn(['Cement', 'Iron', 'Concrete Mixer']).withMessage('Category must be: Cement, Iron, or Concrete Mixer'),
     check('subCategory').notEmpty().withMessage('Sub category is required'),
     check('units').notEmpty().withMessage('Units is required'),
-    check('vendorId').isMongoId().withMessage('Valid vendor ID is required')
+    check('vendorId').optional().isMongoId().withMessage('Valid vendor ID is required')
   ],
   validate,
   createInventory
@@ -211,6 +213,29 @@ router.put('/:itemId/pricing',
   ],
   validate,
   updateInventoryPricing
+);
+
+// ========================================
+// ZOHO BOOKS MAPPING ROUTES
+// ========================================
+
+// Get unmapped items (Admin/Manager)
+router.get('/zoho/unmapped',
+  authenticateToken,
+  requireAdminOrManager,
+  getUnmappedItems
+);
+
+// Map Zoho Item ID to Inventory Item (Admin/Manager)
+router.put('/:id/zoho/map',
+  authenticateToken,
+  requireAdminOrManager,
+  [
+    check('id').isMongoId().withMessage('Valid inventory ID is required'),
+    check('zohoItemId').notEmpty().withMessage('Zoho Item ID is required')
+  ],
+  validate,
+  mapZohoItem
 );
 
 // ✅ REMOVED: createInventoryPrice and getInventoryPrices routes - Using updateInventoryPricing instead

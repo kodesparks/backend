@@ -1,14 +1,10 @@
 import axios from "axios";
 import { Buffer } from "buffer";
 
-// Log Basic Auth string for debugging (remove in production)
-const debugAuth = () => {
-  const authString = Buffer.from(
+const getAuthString = () =>
+  Buffer.from(
     `${process.env.ENGAGELAB_DEV_KEY}:${process.env.ENGAGELAB_DEV_SECRET}`
   ).toString("base64");
-  console.log("Basic Auth String:", `Basic ${authString}`);
-  return authString;
-};
 
 // Engagelab API client
 const engagelabClient = axios.create({
@@ -20,7 +16,7 @@ const engagelabClient = axios.create({
 
 // Add Basic Auth interceptor
 engagelabClient.interceptors.request.use((config) => {
-  const authString = debugAuth();
+  const authString = getAuthString();
   config.headers.Authorization = `Basic ${authString}`;
   return config;
 });

@@ -1,8 +1,10 @@
 import User from "../models/User.js";
 import OTP from "../models/OTP.js";
-import { sendOTP, verifyOTP } from "../utils/engagelab.js";
+import { sendVerificationEmail, sendOTPEmail } from "../utils/emailService.js";
+import { generateOTP } from "../utils/generateOTP.js";
 import bcrypt from "bcryptjs";
 import { generateTokens, verifyRefreshToken } from "../utils/jwt.js";
+import zohoBooksService from "../utils/zohoBooks.js";
 
 const signup = async (req, res, next) => {
   try {
@@ -12,15 +14,17 @@ const signup = async (req, res, next) => {
       employeeType, companyName, warehouse, createdBy 
     } = req.body;
     
-    // Check if user already exists
-    const existingUser = await User.findOne({
-      $or: [{ phone: phone.replace(/\s/g, "") }, { email: email.toLowerCase() }],
-    });
-    
-    if (existingUser) {
-      return res
-        .status(400)
-        .json({ message: "Phone or email already exists" });
+    // Check if user already exists (tell frontend which one: email or phone)
+    const existingByEmail = await User.findOne({ email: email.toLowerCase() });
+    const existingByPhone = await User.findOne({ phone: phone.replace(/\s/g, "") });
+    if (existingByEmail && existingByPhone && existingByEmail._id.toString() !== existingByPhone._id.toString()) {
+      return res.status(400).json({ message: "Email and phone already registered", code: "BOTH_EXIST" });
+    }
+    if (existingByEmail) {
+      return res.status(400).json({ message: "Email already registered", code: "EMAIL_EXISTS" });
+    }
+    if (existingByPhone) {
+      return res.status(400).json({ message: "Phone number already registered", code: "PHONE_EXISTS" });
     }
 
     // Check if employeeId already exists (for employee roles)
@@ -81,21 +85,61 @@ const signup = async (req, res, next) => {
     }
     
     await user.save();
-    
-    // Generate tokens
-    const { accessToken, refreshToken } = generateTokens(user);
-    
-    // Save refresh token to user
-    user.refreshToken = refreshToken;
-    await user.save();
-    
+
+    // Create customer in Zoho Books when role is customer (non-blocking)
+    if (role === 'customer') {
+      (async () => {
+        try {
+          const zohoCustomerId = await zohoBooksService.createOrGetCustomer(user);
+          if (zohoCustomerId && !user.zohoCustomerId) {
+            user.zohoCustomerId = zohoCustomerId;
+            await user.save();
+            console.log(`✅ Zoho customer created/linked for ${user.email}: ${zohoCustomerId}`);
+          }
+        } catch (err) {
+          console.warn(`⚠️  Zoho customer creation skipped for ${user.email}:`, err.message);
+        }
+      })();
+    }
+
+    // Send email verification OTP when customer onboard (uses SMTP; 6-digit code in email).
+    if (role === 'customer' && user.email) {
+      (async () => {
+        try {
+          const code = generateOTP();
+          const hashedOtp = await bcrypt.hash(code, 10);
+          const expires = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+          await User.findByIdAndUpdate(user._id, {
+            emailVerificationOtp: hashedOtp,
+            emailVerificationOtpExpires: expires
+          });
+          await sendOTPEmail(user.email, user.name, code);
+        } catch (err) {
+          console.warn(`⚠️  Verification OTP email skipped for ${user.email}:`, err.message, '- User and Zoho link are already saved.');
+        }
+      })();
+    }
+
     // Remove password from response
     const userResponse = user.toObject();
     delete userResponse.password;
     delete userResponse.refreshToken;
-    
-    res.status(201).json({ 
-      message: "User created successfully", 
+
+    // For customer: do NOT return tokens until they verify (email or OTP). Frontend shows verify page.
+    if (role === 'customer') {
+      return res.status(201).json({
+        message: "Please verify your email to continue",
+        user: userResponse,
+        requiresVerification: true
+      });
+    }
+
+    // For admin/manager/employee/vendor: log in immediately (return tokens)
+    const { accessToken, refreshToken } = generateTokens(user);
+    user.refreshToken = refreshToken;
+    await user.save();
+    res.status(201).json({
+      message: "User created successfully",
       user: userResponse,
       accessToken,
       refreshToken
@@ -108,21 +152,27 @@ const signup = async (req, res, next) => {
 const generateOTPController = async (req, res, next) => {
   try {
     const { phone } = req.body;
-    const sanitizedPhone = phone.replace(/\s/g, ""); // Ensure no spaces
+    const sanitizedPhone = phone.replace(/\s/g, "");
     const user = await User.findOne({ phone: sanitizedPhone });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    const { messageId, sendChannel } = await sendOTP(sanitizedPhone);
-    // Store messageId in OTP model for verification
+    if (!user.email) {
+      return res.status(400).json({ message: "User has no email; cannot send OTP" });
+    }
+    const code = generateOTP();
+    const hashedOtp = await bcrypt.hash(code, 10);
     const otpDoc = new OTP({
       phone: sanitizedPhone,
-      otp: "engagelab-managed",
+      otp: hashedOtp,
       type: "signup",
-      messageId,
     });
     await otpDoc.save();
-    res.status(200).json({ message: "OTP sent", messageId, sendChannel });
+    const sent = await sendOTPEmail(user.email, user.name, code);
+    if (!sent) {
+      return res.status(503).json({ message: "Failed to send OTP email; check SMTP config" });
+    }
+    res.status(200).json({ message: "OTP sent to your email", sendChannel: "email" });
   } catch (error) {
     next(error);
   }
@@ -131,7 +181,7 @@ const generateOTPController = async (req, res, next) => {
 const verifyOTPController = async (req, res, next) => {
   try {
     const { phone, otp } = req.body;
-    const sanitizedPhone = phone.replace(/\s/g, ""); // Ensure no spaces
+    const sanitizedPhone = phone.replace(/\s/g, "");
     const otpDoc = await OTP.findOne({
       phone: sanitizedPhone,
       type: "signup",
@@ -140,7 +190,7 @@ const verifyOTPController = async (req, res, next) => {
     if (!otpDoc) {
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
-    const verified = await verifyOTP(otpDoc.messageId, otp);
+    const verified = await bcrypt.compare(otp, otpDoc.otp);
     if (!verified) {
       return res.status(400).json({ message: "OTP verification failed" });
     }
@@ -154,7 +204,19 @@ const verifyOTPController = async (req, res, next) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    res.status(200).json({ message: "OTP verified", user });
+    // After OTP verify: give tokens so frontend can log in and redirect to home
+    const { accessToken, refreshToken } = generateTokens(user);
+    user.refreshToken = refreshToken;
+    await user.save();
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    delete userResponse.refreshToken;
+    res.status(200).json({
+      message: "OTP verified",
+      user: userResponse,
+      accessToken,
+      refreshToken
+    });
   } catch (error) {
     next(error);
   }
@@ -656,7 +718,125 @@ const getAllRoles = async (req, res, next) => {
   }
 };
 
+/**
+ * Send verification OTP email to the authenticated user (customer onboard flow).
+ * Uses SMTP – sends 6-digit OTP in email.
+ */
+const sendVerifyEmailController = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.userId).select("+emailVerificationOtp +emailVerificationOtpExpires");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (user.isEmailVerified) {
+      return res.status(400).json({ message: "Email is already verified" });
+    }
+    if (!user.email) {
+      return res.status(400).json({ message: "No email to send verification to" });
+    }
+    const code = generateOTP();
+    const hashedOtp = await bcrypt.hash(code, 10);
+    const expires = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    user.emailVerificationOtp = hashedOtp;
+    user.emailVerificationOtpExpires = expires;
+    await user.save({ validateBeforeSave: false });
+
+    const sent = await sendOTPEmail(user.email, user.name, code);
+    if (!sent) {
+      return res.status(503).json({
+        message: "Verification email could not be sent. SMTP may not be configured.",
+        hint: "Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env"
+      });
+    }
+    res.status(200).json({ message: "Verification code sent to your email." });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Verify email using OTP (from verification email) or legacy token (link). No auth required.
+ * POST/GET: ?email=...&otp=... or body { email, otp } for OTP; ?token=... or body { token } for legacy link.
+ */
+const verifyEmailController = async (req, res, next) => {
+  try {
+    const email = (req.query.email || req.body?.email || "").toString().toLowerCase().trim();
+    const otp = (req.query.otp || req.body?.otp || "").toString().trim();
+    const token = (req.query.token || req.body?.token || "").toString().trim();
+
+    // OTP flow: email + 6-digit OTP
+    if (email && otp) {
+      const user = await User.findOne({ email }).select("+emailVerificationOtp +emailVerificationOtpExpires");
+      if (!user) {
+        return res.status(400).json({ message: "Invalid or expired verification code" });
+      }
+      if (!user.emailVerificationOtp || !user.emailVerificationOtpExpires || user.emailVerificationOtpExpires < new Date()) {
+        return res.status(400).json({ message: "Verification code expired. Request a new one." });
+      }
+      const verified = await bcrypt.compare(otp, user.emailVerificationOtp);
+      if (!verified) {
+        return res.status(400).json({ message: "Invalid verification code" });
+      }
+      user.isEmailVerified = true;
+      user.emailVerificationOtp = undefined;
+      user.emailVerificationOtpExpires = undefined;
+      await user.save({ validateBeforeSave: false });
+
+      const { accessToken, refreshToken } = generateTokens(user);
+      user.refreshToken = refreshToken;
+      await user.save({ validateBeforeSave: false });
+
+      const userResponse = user.toObject();
+      delete userResponse.password;
+      delete userResponse.refreshToken;
+      delete userResponse.emailVerificationOtp;
+      delete userResponse.emailVerificationOtpExpires;
+      return res.status(200).json({
+        message: "Email verified successfully",
+        user: userResponse,
+        accessToken,
+        refreshToken
+      });
+    }
+
+    // Legacy: token (link) flow
+    if (!token) {
+      return res.status(400).json({ message: "Email and OTP are required, or verification token" });
+    }
+    const user = await User.findOne({
+      emailVerificationToken: token,
+      emailVerificationTokenExpires: { $gt: new Date() }
+    }).select("+emailVerificationToken +emailVerificationTokenExpires");
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired verification link" });
+    }
+    user.isEmailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationTokenExpires = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    const { accessToken, refreshToken } = generateTokens(user);
+    user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
+
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    delete userResponse.refreshToken;
+    delete userResponse.emailVerificationToken;
+    delete userResponse.emailVerificationTokenExpires;
+    res.status(200).json({
+      message: "Email verified successfully",
+      user: userResponse,
+      accessToken,
+      refreshToken
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export { 
   signup, generateOTPController, verifyOTPController, login, refreshToken, logout, changePassword,
+  sendVerifyEmailController, verifyEmailController,
   createUser, getAllUsers, getUserById, updateUser, deleteUser, getRoleConfig, getAllRoles
 };

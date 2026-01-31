@@ -4,6 +4,7 @@ import OrderDelivery from '../../models/OrderDelivery.js';
 import OrderPayment from '../../models/OrderPayment.js';
 import User from '../../models/User.js';
 import mongoose from 'mongoose';
+import zohoBooksService from '../../utils/zohoBooks.js';
 
 // Get all orders (Admin)
 export const getAllOrders = async (req, res) => {
@@ -539,6 +540,8 @@ export const markPaymentDone = async (req, res) => {
       remarks || `Payment of ₹${paidAmount} received via ${paymentMethod}${transactionId ? ` (Transaction ID: ${transactionId})` : ''}`
     );
 
+    // Invoice is created in Zoho only at delivery status (in_transit/out_for_delivery), not at payment_done.
+
     res.status(200).json({
       message: 'Payment marked as done successfully',
       order: {
@@ -659,6 +662,9 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
+    // Store previous status before updating
+    const previousStatus = order.orderStatus;
+
     // Update order status
     await order.updateStatus(orderStatus);
 
@@ -671,6 +677,83 @@ export const updateOrderStatus = async (req, res) => {
       adminId,
       remarks || `Order status updated to ${orderStatus} by admin`
     );
+
+    // Create Quote in Zoho Books when admin reviews order and creates quotation (background, non-blocking)
+    // Step 2: Admin creates quotation → Create Quote in Zoho
+    // Quote should be created when order transitions from "order_placed" to "vendor_accepted"
+    if (orderStatus === 'vendor_accepted' && !order.zohoQuoteId && previousStatus === 'order_placed') {
+      (async () => {
+        try {
+          const customer = await User.findById(order.custUserId);
+          const populatedOrder = await Order.findById(order._id)
+            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+          
+          const zohoQuote = await zohoBooksService.createQuote(populatedOrder, customer);
+          if (zohoQuote?.estimate_id) {
+            order.zohoQuoteId = zohoQuote.estimate_id;
+            await order.save();
+            console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId}`);
+            await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch((err) => {
+              console.warn(`⚠️ Quote email failed for order ${order.leadId}:`, err?.message || err);
+            });
+            // TODO: Send SMS or email to customer with quote link / payment link (integrate when notification service is ready)
+            // e.g. notifyCustomerQuoteCreated(order, customer, zohoQuote.estimate_id);
+          }
+        } catch (error) {
+          console.error(`❌ Failed to create Zoho Quote for order ${order.leadId}:`, error.message);
+          // Don't fail the main request if Zoho integration fails
+        }
+      })();
+    }
+
+    // Create Sales Order in Zoho Books when admin accepts/confirms order (background, non-blocking)
+    // Step 4: Admin generates SO → Create Sales Order in Zoho
+    if ((orderStatus === 'vendor_accepted' || orderStatus === 'order_confirmed') && !order.zohoSalesOrderId) {
+      (async () => {
+        try {
+          const vendor = order.vendorId ? await User.findById(order.vendorId) : null;
+          const customer = await User.findById(order.custUserId);
+          const populatedOrder = await Order.findById(order._id)
+            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+          const zohoSO = await zohoBooksService.createSalesOrder(populatedOrder, vendor, customer);
+          if (zohoSO?.salesorder_id) {
+            order.zohoSalesOrderId = zohoSO.salesorder_id;
+            await order.save();
+            console.log(`✅ Zoho Sales Order created: ${zohoSO.salesorder_id} for order ${order.leadId}`);
+            await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch(() => {});
+          }
+        } catch (error) {
+          console.error(`❌ Failed to create Zoho Sales Order for order ${order.leadId}:`, error.message);
+          // Don't fail the main request if Zoho integration fails
+        }
+      })();
+    }
+
+    // Create Invoice in Zoho only when order status is set to out_for_delivery (if not already created)
+    if (orderStatus === 'out_for_delivery' && !order.zohoInvoiceId) {
+      (async () => {
+        try {
+          const currentOrder = await Order.findById(order._id);
+          if (!currentOrder || currentOrder.zohoInvoiceId) return;
+          const populatedOrder = await Order.findById(order._id)
+            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+          const payment = await OrderPayment.findByInvoice(currentOrder.invcNum);
+          const vendor = currentOrder.vendorId ? await User.findById(currentOrder.vendorId) : null;
+          const customer = await User.findById(currentOrder.custUserId);
+          const zohoInvoice = await zohoBooksService.createInvoice(populatedOrder, payment, vendor, customer);
+          if (zohoInvoice?.invoice_id) {
+            currentOrder.zohoInvoiceId = zohoInvoice.invoice_id;
+            await currentOrder.save();
+            console.log(`✅ Zoho Invoice created: ${zohoInvoice.invoice_id} for order ${currentOrder.leadId}`);
+            await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch((err) => {
+              console.warn(`⚠️ Invoice email failed for order ${currentOrder.leadId}:`, err?.message || err);
+            });
+          }
+        } catch (err) {
+          console.error(`❌ Zoho Invoice for order ${order.leadId}:`, err.message);
+        }
+      })();
+    }
 
     res.status(200).json({
       message: 'Order status updated successfully',
@@ -919,6 +1002,134 @@ export const markDelivered = async (req, res) => {
     console.error('Mark delivered error:', error);
     res.status(500).json({
       message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Download Purchase Order PDF (Admin)
+export const downloadPurchaseOrderPDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+
+    const order = await Order.findOne({
+      leadId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!order.zohoPurchaseOrderId) {
+      return res.status(404).json({ message: 'Purchase Order not found in Zoho Books' });
+    }
+
+    const pdfBuffer = await zohoBooksService.getPurchaseOrderPDF(order.zohoPurchaseOrderId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="PO-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download PO PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Purchase Order PDF',
+      error: error.message
+    });
+  }
+};
+
+// Download Sales Order PDF (Admin)
+export const downloadSalesOrderPDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+
+    const order = await Order.findOne({
+      leadId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!order.zohoSalesOrderId) {
+      return res.status(404).json({ message: 'Sales Order not found in Zoho Books' });
+    }
+
+    const pdfBuffer = await zohoBooksService.getSalesOrderPDF(order.zohoSalesOrderId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="SO-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download SO PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Sales Order PDF',
+      error: error.message
+    });
+  }
+};
+
+// Download Quote PDF (Admin)
+export const downloadQuotePDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+
+    const order = await Order.findOne({
+      leadId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!order.zohoQuoteId) {
+      return res.status(404).json({ message: 'Quote not found in Zoho Books' });
+    }
+
+    const pdfBuffer = await zohoBooksService.getQuotePDF(order.zohoQuoteId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Quote-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download Quote PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Quote PDF',
+      error: error.message
+    });
+  }
+};
+
+// Download Invoice PDF (Admin)
+export const downloadInvoicePDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+
+    const order = await Order.findOne({
+      leadId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!order.zohoInvoiceId) {
+      return res.status(404).json({ message: 'Invoice not found in Zoho Books' });
+    }
+
+    const pdfBuffer = await zohoBooksService.getInvoicePDF(order.zohoInvoiceId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Invoice-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download Invoice PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Invoice PDF',
       error: error.message
     });
   }

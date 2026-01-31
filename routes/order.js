@@ -15,7 +15,11 @@ import {
   getOrderTracking,
   changeDeliveryAddress,
   changeDeliveryDate,
-  getOrderChangeHistory
+  getOrderChangeHistory,
+  downloadQuotePDF,
+  downloadPurchaseOrderPDF,
+  downloadSalesOrderPDF,
+  downloadInvoicePDF
 } from '../controllers/order/customer.js';
 
 import {
@@ -27,7 +31,8 @@ import {
   updateDeliveryTracking,
   getVendorOrderStats,
   getPendingOrders,
-  updateVendorOrderStatus
+  updateVendorOrderStatus,
+  downloadSalesOrderPDF as downloadVendorSalesOrderPDF
 } from '../controllers/order/vendor.js';
 
 import {
@@ -47,7 +52,11 @@ import {
   updateDelivery,
   getDeliveryDetails,
   markDelivered,
-  getStatusHistory
+  getStatusHistory,
+  downloadPurchaseOrderPDF as downloadAdminPurchaseOrderPDF,
+  downloadQuotePDF as downloadAdminQuotePDF,
+  downloadSalesOrderPDF as downloadAdminSalesOrderPDF,
+  downloadInvoicePDF as downloadAdminInvoicePDF
 } from '../controllers/order/admin.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { requireRole } from '../middleware/auth.js';
@@ -311,6 +320,34 @@ router.get('/customer/orders/:leadId/change-history',
   getOrderChangeHistory
 );
 
+// Download Quote PDF (Customer) – created in Zoho when order is placed
+router.get('/customer/orders/:leadId/pdf/quote',
+  authenticateToken,
+  leadIdValidation,
+  downloadQuotePDF
+);
+
+// Download Purchase Order PDF (Customer; only when vendor assigned and PO created)
+router.get('/customer/orders/:leadId/pdf/po',
+  authenticateToken,
+  leadIdValidation,
+  downloadPurchaseOrderPDF
+);
+
+// Download Sales Order PDF (Customer; available after admin/vendor generates SO)
+router.get('/customer/orders/:leadId/pdf/sales-order',
+  authenticateToken,
+  leadIdValidation,
+  downloadSalesOrderPDF
+);
+
+// Download Invoice PDF (Customer)
+router.get('/customer/orders/:leadId/pdf/invoice',
+  authenticateToken,
+  leadIdValidation,
+  downloadInvoicePDF
+);
+
 // ==================== VENDOR ROUTES ====================
 
 // Get vendor order statistics (Must be BEFORE /:leadId)
@@ -401,6 +438,14 @@ router.put('/vendor/orders/:leadId/delivery',
   leadIdValidation,
   updateDeliveryTrackingValidation,
   updateDeliveryTracking
+);
+
+// Download Sales Order PDF (Vendor)
+router.get('/vendor/orders/:leadId/pdf/so',
+  authenticateToken,
+  requireRole(['vendor']),
+  leadIdValidation,
+  downloadVendorSalesOrderPDF
 );
 
 // Update order status (Vendor - for shipping statuses)
@@ -532,6 +577,38 @@ router.get('/admin/orders/:leadId/status-history',
   requireRole(['admin']),
   leadIdValidation,
   getStatusHistory
+);
+
+// Download Purchase Order PDF (Admin)
+router.get('/admin/orders/:leadId/pdf/po',
+  authenticateToken,
+  requireRole(['admin']),
+  leadIdValidation,
+  downloadAdminPurchaseOrderPDF
+);
+
+// Download Quote PDF (Admin)
+router.get('/admin/orders/:leadId/pdf/quote',
+  authenticateToken,
+  requireRole(['admin']),
+  leadIdValidation,
+  downloadAdminQuotePDF
+);
+
+// Download Sales Order PDF (Admin)
+router.get('/admin/orders/:leadId/pdf/so',
+  authenticateToken,
+  requireRole(['admin']),
+  leadIdValidation,
+  downloadAdminSalesOrderPDF
+);
+
+// Download Invoice PDF (Admin)
+router.get('/admin/orders/:leadId/pdf/invoice',
+  authenticateToken,
+  requireRole(['admin']),
+  leadIdValidation,
+  downloadAdminInvoicePDF
 );
 
 // Get payment details for specific order

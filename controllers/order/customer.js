@@ -8,6 +8,8 @@ import { validationResult } from 'express-validator';
 import geocodingService from '../../services/geocodingService.js';
 import distanceService from '../../services/distanceService.js';
 import WarehouseService from '../../services/warehouseService.js';
+import zohoBooksService from '../../utils/zohoBooks.js';
+import User from '../../models/User.js';
 
 // Add item to cart (Create order)
 export const addToCart = async (req, res) => {
@@ -43,6 +45,9 @@ export const addToCart = async (req, res) => {
         message: 'Pricing not found for this item'
       });
     }
+
+    // Phase 1: vendor optional; order can have vendorId null when no vendor portal
+    const orderVendorId = inventoryItem.vendorId || null;
 
     // Calculate delivery charges using nearest warehouse for this specific item
     let deliveryCharges = 0;
@@ -141,7 +146,7 @@ export const addToCart = async (req, res) => {
     const order = new Order({
       leadId,
       custUserId: customerId,
-      vendorId: inventoryItem.vendorId,
+      vendorId: orderVendorId,
       items: orderItems,
       totalQty: qty,
       totalAmount: totalAmount,
@@ -512,6 +517,146 @@ export const removeOrderFromCart = async (req, res) => {
 };
 
 // Clear entire cart (remove all pending orders)
+// Download Quote PDF (created in Zoho when order is placed)
+export const downloadQuotePDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const customerId = req.user.userId;
+
+    const order = await Order.findOne({
+      leadId,
+      custUserId: customerId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!order.zohoQuoteId) {
+      return res.status(404).json({ message: 'Quote not found in Zoho Books. It may still be generating; try again in a moment.' });
+    }
+
+    const pdfBuffer = await zohoBooksService.getQuotePDF(order.zohoQuoteId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Quote-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download Quote PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Quote PDF',
+      error: error.message
+    });
+  }
+};
+
+// Download Purchase Order PDF (only when vendor assigned and PO created in Zoho)
+export const downloadPurchaseOrderPDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const customerId = req.user.userId;
+
+    const order = await Order.findOne({
+      leadId,
+      custUserId: customerId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!order.zohoPurchaseOrderId) {
+      return res.status(404).json({ message: 'Purchase Order not found in Zoho Books' });
+    }
+
+    const pdfBuffer = await zohoBooksService.getPurchaseOrderPDF(order.zohoPurchaseOrderId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="PO-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download PO PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Purchase Order PDF',
+      error: error.message
+    });
+  }
+};
+
+// Download Invoice PDF
+export const downloadInvoicePDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const customerId = req.user.userId;
+
+    const order = await Order.findOne({
+      leadId,
+      custUserId: customerId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!order.zohoInvoiceId) {
+      return res.status(404).json({
+        message: 'Invoice not yet generated',
+        code: 'INVOICE_NOT_READY',
+        detail: 'The invoice is created when your order is shipped (delivery status: in transit or out for delivery).'
+      });
+    }
+
+    const pdfBuffer = await zohoBooksService.getInvoicePDF(order.zohoInvoiceId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Invoice-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download Invoice PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Invoice PDF',
+      error: error.message
+    });
+  }
+};
+
+// Download Sales Order PDF (Customer; available after admin/vendor generates SO in Zoho)
+export const downloadSalesOrderPDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const customerId = req.user.userId;
+
+    const order = await Order.findOne({
+      leadId,
+      custUserId: customerId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!order.zohoSalesOrderId) {
+      return res.status(404).json({ message: 'Sales Order not found in Zoho Books' });
+    }
+
+    const pdfBuffer = await zohoBooksService.getSalesOrderPDF(order.zohoSalesOrderId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="SalesOrder-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download Sales Order PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Sales Order PDF',
+      error: error.message
+    });
+  }
+};
+
 export const clearCart = async (req, res) => {
   try {
     const customerId = req.user.userId;
@@ -640,6 +785,31 @@ export const placeOrder = async (req, res) => {
 
     await delivery.save();
 
+    // Create Quote (Estimate) in Zoho Books when order is placed – customer can download Quote PDF
+    if (!order.zohoQuoteId) {
+      (async () => {
+        try {
+          const customer = await User.findById(customerId);
+          const populatedOrder = await Order.findById(order._id)
+            .populate('items.itemCode', 'itemDescription category subCategory units pricing zohoItemId');
+          if (!customer) return;
+          const zohoQuote = await zohoBooksService.createQuote(populatedOrder, customer);
+          if (zohoQuote?.estimate_id) {
+            await Order.updateOne(
+              { _id: order._id },
+              { $set: { zohoQuoteId: zohoQuote.estimate_id } }
+            );
+            console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId}`);
+            await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch((err) => {
+              console.warn(`⚠️ Quote email failed for order ${order.leadId}:`, err?.message || err);
+            });
+          }
+        } catch (error) {
+          console.error(`❌ Failed to create Zoho Quote for order ${order.leadId}:`, error.message);
+        }
+      })();
+    }
+
     res.status(200).json({
       message: 'Order placed successfully',
       order: {
@@ -730,6 +900,8 @@ export const processPayment = async (req, res) => {
           customerId,
           'Order confirmed after successful payment'
         );
+
+        // Invoice is created in Zoho only at delivery status (in_transit/out_for_delivery), not at payment_done.
 
       } catch (error) {
         console.error('Payment processing error:', error);

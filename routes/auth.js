@@ -8,7 +8,9 @@ import {
   login,
   refreshToken,
   logout,
-  changePassword
+  changePassword,
+  sendVerifyEmailController,
+  verifyEmailController
 } from "../controllers/auth.js";
 
 const router = express.Router();
@@ -148,6 +150,28 @@ router.put(
   ],
   validate,
   changePassword
+);
+
+// Email verification (customer onboard flow – uses SMTP, not Zoho Books API)
+router.post("/send-verify-email", authenticateToken, sendVerifyEmailController);
+router.get("/verify-email", verifyEmailController);
+router.post(
+  "/verify-email",
+  [
+    check("token").optional().trim(),
+    check("email").optional().trim().toLowerCase(),
+    check("otp").optional().trim().isLength({ min: 6, max: 6 }).withMessage("OTP must be 6 digits"),
+    check().custom((_value, { req }) => {
+      const hasToken = (req.body?.token || req.query?.token || "").toString().trim();
+      const hasEmail = (req.body?.email || req.query?.email || "").toString().trim();
+      const hasOtp = (req.body?.otp || req.query?.otp || "").toString().trim();
+      if (hasToken) return true;
+      if (hasEmail && hasOtp) return true;
+      throw new Error("Either verification token or both email and OTP are required");
+    })
+  ],
+  validate,
+  verifyEmailController
 );
 
 export default router;

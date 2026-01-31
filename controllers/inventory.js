@@ -2,10 +2,24 @@ import Inventory from '../models/Inventory.js';
 import Promo from '../models/Promo.js';
 import User from '../models/User.js';
 import { deleteImageFromS3, deleteMultipleImagesFromS3 } from '../utils/awsS3.js';
+import zohoBooksService from '../utils/zohoBooks.js';
 
 // ========================================
 // INVENTORY CONTROLLERS
 // ========================================
+
+// Use same Zoho item creation as test script (createOrGetItem → createItemInZoho: plain name, no suffix).
+async function syncInventoryToZoho(inventory) {
+  try {
+    const zohoItemId = await zohoBooksService.createOrGetItem(inventory);
+    if (zohoItemId) {
+      inventory.zohoItemId = zohoItemId;
+      await inventory.save();
+    }
+  } catch (err) {
+    console.error(`❌ Zoho sync for item ${inventory.itemCode}:`, err?.message || err);
+  }
+}
 
 // Create Inventory Item
 export const createInventory = async (req, res, next) => {
@@ -25,19 +39,18 @@ export const createInventory = async (req, res, next) => {
       warehouses
     } = req.body;
 
-    // Check if vendor exists and is a vendor role
-    const vendor = await User.findById(vendorId);
-    if (!vendor || vendor.role !== 'vendor') {
-      return res.status(400).json({ 
-        message: "Invalid vendor ID or vendor not found" 
-      });
-    }
-
-    // Check permissions
-    if (req.user.role === 'vendor' && req.user._id.toString() !== vendorId) {
-      return res.status(403).json({ 
-        message: "You can only create inventory for your own vendor account" 
-      });
+    if (vendorId) {
+      const vendor = await User.findById(vendorId);
+      if (!vendor || vendor.role !== 'vendor') {
+        return res.status(400).json({
+          message: "Invalid vendor ID or vendor not found"
+        });
+      }
+      if (req.user.role === 'vendor' && req.user._id.toString() !== vendorId) {
+        return res.status(403).json({
+          message: "You can only create inventory for your own vendor account"
+        });
+      }
     }
 
     const inventory = new Inventory({
@@ -50,18 +63,22 @@ export const createInventory = async (req, res, next) => {
       specification,
       deliveryInformation,
       hscCode,
-      vendorId,
+      ...(vendorId && { vendorId }),
       createdBy: req.user.userId,
-      // Include pricing data if provided
       ...(pricing && { pricing }),
-      // Include warehouses data if provided
       ...(warehouses && { warehouses })
     });
 
     await inventory.save();
 
-    // Populate vendor information
-    await inventory.populate('vendorId', 'name email role');
+    if (inventory.vendorId) {
+      await inventory.populate('vendorId', 'name email role');
+    }
+
+    // Zoho sync in background so API returns quickly (avoids frontend timeout)
+    syncInventoryToZoho(inventory).catch((err) => {
+      console.error('Zoho sync (background):', err?.message || err);
+    });
 
     res.status(201).json({
       message: "Inventory item created successfully",
@@ -114,7 +131,7 @@ export const getAllInventory = async (req, res, next) => {
     const inventory = await Inventory.find(filter)
       .populate('vendorId', 'name email role')
       .populate('createdBy', 'name email role')
-      .select('itemDescription category subCategory grade units details specification pricing warehouses vendorId createdBy isActive itemCode images primaryImage shipping warehouse createdDate timestamp updateDate updateTime createdAt updatedAt __v formattedItemCode id') // Explicitly select fields, excluding delivery
+      .select('itemDescription category subCategory grade units details specification pricing warehouses vendorId createdBy isActive itemCode images primaryImage shipping warehouse createdDate timestamp updateDate updateTime createdAt updatedAt __v formattedItemCode zohoItemId id') // Include zohoItemId for frontend Zoho link
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -144,7 +161,7 @@ export const getInventoryById = async (req, res, next) => {
     const inventory = await Inventory.findById(id)
       .populate('vendorId', 'name email role')
       .populate('createdBy', 'name email role')
-      .select('itemDescription category subCategory grade units details specification pricing warehouses vendorId createdBy isActive itemCode images primaryImage shipping warehouse createdDate timestamp updateDate updateTime createdAt updatedAt __v formattedItemCode id'); // Explicitly select fields, excluding delivery
+      .select('itemDescription category subCategory grade units details specification pricing warehouses vendorId createdBy isActive itemCode images primaryImage shipping warehouse createdDate timestamp updateDate updateTime createdAt updatedAt __v formattedItemCode zohoItemId id'); // Include zohoItemId for frontend Zoho link
 
     if (!inventory) {
       return res.status(404).json({ message: "Inventory item not found" });
@@ -451,6 +468,60 @@ export const calculatePromoDiscount = async (req, res, next) => {
 // ========================================
 
 // Get All Categories and Subcategories
+// Map Zoho Item ID to Inventory Item (Admin/Manager)
+export const mapZohoItem = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { zohoItemId } = req.body;
+
+    if (!zohoItemId) {
+      return res.status(400).json({ message: 'Zoho Item ID is required' });
+    }
+
+    const inventory = await Inventory.findById(id);
+    if (!inventory) {
+      return res.status(404).json({ message: 'Inventory item not found' });
+    }
+
+    inventory.zohoItemId = zohoItemId;
+    await inventory.save();
+
+    res.status(200).json({
+      message: 'Zoho Item ID mapped successfully',
+      inventory: {
+        _id: inventory._id,
+        itemDescription: inventory.itemDescription,
+        zohoItemId: inventory.zohoItemId
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get unmapped items (Admin/Manager)
+export const getUnmappedItems = async (req, res, next) => {
+  try {
+    const items = await Inventory.find({
+      isActive: true,
+      $or: [
+        { zohoItemId: { $exists: false } },
+        { zohoItemId: null }
+      ]
+    })
+    .select('_id itemCode itemDescription category subCategory units pricing zohoItemId')
+    .limit(100);
+
+    res.status(200).json({
+      message: 'Unmapped items retrieved successfully',
+      count: items.length,
+      items
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getAllCategories = async (req, res, next) => {
   try {
     const categories = Inventory.getAllCategories();
@@ -739,22 +810,16 @@ export const getSingleItemPromos = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { active = true } = req.query;
-
     let filter = { itemCode: id };
-    
-    // Filter by active status if specified
     if (active === 'true') {
       filter.isActive = true;
       filter.startDate = { $lte: new Date() };
       filter.endDate = { $gte: new Date() };
     }
-
-    // Find all promos for this specific item
     const promos = await Promo.find(filter)
       .populate('itemCode', 'itemDescription category subCategory')
       .populate('vendorId', 'name email')
       .sort({ createdAt: -1 });
-
     res.json({
       message: 'Promo data retrieved successfully',
       promos,

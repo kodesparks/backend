@@ -15,11 +15,12 @@ const orderStatusSchema = new mongoose.Schema({
     required: true
   },
   
-  // Vendor ID - Foreign Key
+  // Vendor ID (optional for Phase 1 when no vendor portal)
   vendorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false,
+    default: null
   },
   
   // Order Status

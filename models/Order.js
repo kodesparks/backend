@@ -39,11 +39,12 @@ const orderSchema = new mongoose.Schema({
     }
   }],
   
-  // Vendor Information (Single vendor per order)
+  // Vendor Information (optional for Phase 1 when no vendor portal)
   vendorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false,
+    default: null
   },
   
   // Order Totals
@@ -159,6 +160,28 @@ const orderSchema = new mongoose.Schema({
     type: String,
     enum: ['pending', 'order_placed', 'vendor_accepted', 'payment_done', 'order_confirmed', 'truck_loading', 'in_transit', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'],
     default: 'pending'
+  },
+  
+  // Zoho Books Integration References
+  zohoPurchaseOrderId: {
+    type: String,
+    default: null
+  },
+  zohoQuoteId: {
+    type: String,
+    default: null
+  },
+  zohoSalesOrderId: {
+    type: String,
+    default: null
+  },
+  zohoInvoiceId: {
+    type: String,
+    default: null
+  },
+  zohoEWayBillId: {
+    type: String,
+    default: null
   },
   
   // Timestamps

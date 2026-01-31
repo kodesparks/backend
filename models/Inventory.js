@@ -242,11 +242,20 @@ const inventorySchema = new mongoose.Schema(
       }
     }],
 
-    // Relationships
+    // Zoho Books Integration
+    zohoItemId: {
+      type: String,
+      default: null,
+      index: true,
+      trim: true
+    },
+
+    // Relationships (vendorId optional for Phase 1 when vendor portal is not launched)
     vendorId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true
+      required: false,
+      default: null
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

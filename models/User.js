@@ -247,6 +247,38 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    emailVerificationToken: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    emailVerificationTokenExpires: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+    emailVerificationOtp: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    emailVerificationOtpExpires: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+
+    // Zoho Books Integration
+    zohoVendorId: {
+      type: String,
+      default: null,
+      sparse: true
+    },
+    zohoCustomerId: {
+      type: String,
+      default: null,
+      sparse: true
+    },
     isActive: {
       type: Boolean,
       default: true,

@@ -1,7 +1,10 @@
 import Order from '../../models/Order.js';
 import OrderStatus from '../../models/OrderStatus.js';
 import OrderDelivery from '../../models/OrderDelivery.js';
+import OrderPayment from '../../models/OrderPayment.js';
 import { validationResult } from 'express-validator';
+import zohoBooksService from '../../utils/zohoBooks.js';
+import User from '../../models/User.js';
 
 // Get vendor's orders
 export const getVendorOrders = async (req, res) => {
@@ -149,6 +152,58 @@ export const acceptOrder = async (req, res) => {
       remarks || 'Order accepted by vendor'
     );
 
+    // Create Quote in Zoho Books if not already created (background, non-blocking)
+    // Step 2: Admin creates quotation → Create Quote in Zoho
+    // Quote should be created when order is accepted (by admin or vendor)
+    if (!order.zohoQuoteId) {
+      (async () => {
+        try {
+          const customer = await User.findById(order.custUserId);
+          const populatedOrder = await Order.findById(order._id)
+            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+          
+          const zohoQuote = await zohoBooksService.createQuote(populatedOrder, customer);
+          if (zohoQuote?.estimate_id) {
+            order.zohoQuoteId = zohoQuote.estimate_id;
+            await order.save();
+            console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId}`);
+            await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch((err) => {
+              console.warn(`⚠️ Quote email failed for order ${order.leadId}:`, err?.message || err);
+            });
+          }
+        } catch (error) {
+          console.error(`❌ Failed to create Zoho Quote for order ${order.leadId}:`, error.message);
+          // Don't fail the main request if Zoho integration fails
+        }
+      })();
+    }
+
+    // Create Sales Order in Zoho Books (background, non-blocking)
+    // Step 4: Admin generates SO → Create Sales Order in Zoho
+    if (!order.zohoSalesOrderId) {
+      (async () => {
+        try {
+          const vendor = await User.findById(vendorId);
+          const customer = await User.findById(order.custUserId);
+          const populatedOrder = await Order.findById(order._id)
+            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+          
+          const zohoSO = await zohoBooksService.createSalesOrder(populatedOrder, vendor, customer);
+          if (zohoSO?.salesorder_id) {
+            order.zohoSalesOrderId = zohoSO.salesorder_id;
+            await order.save();
+            console.log(`✅ Zoho Sales Order created: ${zohoSO.salesorder_id} for order ${order.leadId}`);
+            await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch((err) => {
+              console.warn(`⚠️ Sales Order email failed for order ${order.leadId}:`, err?.message || err);
+            });
+          }
+        } catch (error) {
+          console.error(`❌ Failed to create Zoho Sales Order for order ${order.leadId}:`, error.message);
+          // Don't fail the main request if Zoho integration fails
+        }
+      })();
+    }
+
     res.status(200).json({
       message: 'Order accepted successfully',
       order: {
@@ -289,10 +344,8 @@ export const updateDeliveryTracking = async (req, res) => {
         vendorId,
         'Order delivered successfully'
       );
-    } else if (deliveryStatus === 'in_transit' || deliveryStatus === 'out_for_delivery') {
+    } else if (deliveryStatus === 'in_transit') {
       await order.updateStatus('shipped');
-      
-      // Create status update
       await OrderStatus.createStatusUpdate(
         order.leadId,
         order.invcNum,
@@ -301,6 +354,58 @@ export const updateDeliveryTracking = async (req, res) => {
         vendorId,
         'Order shipped and in transit'
       );
+    } else if (deliveryStatus === 'out_for_delivery') {
+      await order.updateStatus('shipped');
+      await OrderStatus.createStatusUpdate(
+        order.leadId,
+        order.invcNum,
+        order.vendorId,
+        'shipped',
+        vendorId,
+        'Order out for delivery'
+      );
+
+      // Step 5: Only at out_for_delivery → Create Invoice (if not exists) then E-Way Bill in Zoho Books (background, non-blocking)
+      // Invoice and E-Way Bill are generated only when delivery status is out_for_delivery, NOT at in_transit or shipped.
+      (async () => {
+        try {
+          let currentOrder = order;
+          // 1) Create Invoice in Zoho if not already created
+          if (!currentOrder.zohoInvoiceId) {
+            const populatedOrder = await Order.findById(currentOrder._id)
+              .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+            const payment = await OrderPayment.findByInvoice(currentOrder.invcNum);
+            const vendor = currentOrder.vendorId ? await User.findById(currentOrder.vendorId) : null;
+            const customer = await User.findById(currentOrder.custUserId);
+            const zohoInvoice = await zohoBooksService.createInvoice(populatedOrder, payment, vendor, customer);
+            if (zohoInvoice?.invoice_id) {
+              currentOrder.zohoInvoiceId = zohoInvoice.invoice_id;
+              await currentOrder.save();
+              console.log(`✅ Zoho Invoice created: ${zohoInvoice.invoice_id} for order ${currentOrder.leadId}`);
+              await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch((err) => {
+                console.warn(`⚠️ Invoice email failed for order ${currentOrder.leadId}:`, err?.message || err);
+              });
+            }
+          }
+          // 2) Create E-Way Bill if we have invoice and not already created
+          if (currentOrder.zohoInvoiceId && !currentOrder.zohoEWayBillId) {
+            const ewayBillData = {
+              distance: delivery.distance || 0,
+              transportMode: 'Road',
+              vehicleNumber: delivery.truckNumber || '',
+              vehicleType: delivery.vehicleType || 'Regular'
+            };
+            const zohoEWayBill = await zohoBooksService.createEWayBill(currentOrder.zohoInvoiceId, ewayBillData);
+            if (zohoEWayBill?.ewaybill_id) {
+              currentOrder.zohoEWayBillId = zohoEWayBill.ewaybill_id;
+              await currentOrder.save();
+              console.log(`✅ Zoho E-Way Bill created: ${zohoEWayBill.ewaybill_id} for order ${currentOrder.leadId}`);
+            }
+          }
+        } catch (error) {
+          console.error(`❌ Zoho Invoice/E-Way Bill for order ${order.leadId}:`, error.message);
+        }
+      })();
     }
 
     res.status(200).json({
@@ -328,6 +433,40 @@ export const updateDeliveryTracking = async (req, res) => {
     console.error('Update delivery tracking error:', error);
     res.status(500).json({
       message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Download Sales Order PDF
+export const downloadSalesOrderPDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const vendorId = req.user.userId;
+
+    const order = await Order.findOne({
+      leadId,
+      vendorId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (!order.zohoSalesOrderId) {
+      return res.status(404).json({ message: 'Sales Order not found in Zoho Books' });
+    }
+
+    const pdfBuffer = await zohoBooksService.getSalesOrderPDF(order.zohoSalesOrderId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="SO-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download SO PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Sales Order PDF',
       error: error.message
     });
   }
@@ -492,6 +631,32 @@ export const updateVendorOrderStatus = async (req, res) => {
         delivery.deliveredDate = new Date();
         await delivery.save();
       }
+    }
+
+    // Create Invoice in Zoho only when vendor sets status to out_for_delivery (if not already created)
+    if (orderStatus === 'out_for_delivery' && !order.zohoInvoiceId) {
+      (async () => {
+        try {
+          const currentOrder = await Order.findById(order._id);
+          if (!currentOrder || currentOrder.zohoInvoiceId) return;
+          const populatedOrder = await Order.findById(order._id)
+            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+          const payment = await OrderPayment.findByInvoice(currentOrder.invcNum);
+          const vendor = currentOrder.vendorId ? await User.findById(currentOrder.vendorId) : null;
+          const customer = await User.findById(currentOrder.custUserId);
+          const zohoInvoice = await zohoBooksService.createInvoice(populatedOrder, payment, vendor, customer);
+          if (zohoInvoice?.invoice_id) {
+            currentOrder.zohoInvoiceId = zohoInvoice.invoice_id;
+            await currentOrder.save();
+            console.log(`✅ Zoho Invoice created: ${zohoInvoice.invoice_id} for order ${currentOrder.leadId}`);
+            await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch((err) => {
+              console.warn(`⚠️ Invoice email failed for order ${currentOrder.leadId}:`, err?.message || err);
+            });
+          }
+        } catch (err) {
+          console.error(`❌ Zoho Invoice for order ${order.leadId}:`, err.message);
+        }
+      })();
     }
 
     res.status(200).json({
