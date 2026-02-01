@@ -137,7 +137,21 @@ const placeOrderValidation = [
     .withMessage('Valid delivery date is required'),
   body('receiverMobileNum')
     .matches(/^[6-9]\d{9}$/)
-    .withMessage('Valid receiver mobile number is required')
+    .withMessage('Valid receiver mobile number is required'),
+  body('email')
+    .optional()
+    .isEmail()
+    .withMessage('Valid email when provided'),
+  body('receiverName')
+    .optional()
+    .isString()
+    .withMessage('Receiver name must be a string'),
+  body('city')
+    .optional()
+    .isString(),
+  body('state')
+    .optional()
+    .isString()
 ];
 
 const processPaymentValidation = [

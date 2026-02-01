@@ -731,7 +731,7 @@ export const placeOrder = async (req, res) => {
 
     const { leadId } = req.params;
     const customerId = req.user.userId;
-    const { deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum } = req.body;
+    const { deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, email: payloadEmail, receiverName: payloadReceiverName } = req.body;
 
     const order = await Order.findOne({
       leadId,
@@ -786,14 +786,16 @@ export const placeOrder = async (req, res) => {
 
     await delivery.save();
 
-    // Send order-placed confirmation email from our side (SMTP)
+    // Send order-placed confirmation email from our side (SMTP) – use email/receiverName from payload if provided, else profile
     (async () => {
       try {
-        const customer = await User.findById(customerId).select('email name').lean();
-        if (customer?.email) {
+        const profile = await User.findById(customerId).select('email name').lean();
+        const emailToSend = (payloadEmail && String(payloadEmail).trim()) || profile?.email;
+        const nameToUse = (payloadReceiverName && String(payloadReceiverName).trim()) || profile?.name || 'Customer';
+        if (emailToSend) {
           await sendOrderPlacedEmail(
-            customer.email,
-            customer.name || 'Customer',
+            emailToSend,
+            nameToUse,
             {
               leadId: order.leadId,
               formattedLeadId: order.formattedLeadId,
@@ -804,7 +806,7 @@ export const placeOrder = async (req, res) => {
             }
           );
         } else {
-          console.warn(`⚠️  Order-placed email skipped: no email for customer ${customerId}`);
+          console.warn(`⚠️  Order-placed email skipped: no email in payload and no profile email for customer ${customerId}`);
         }
       } catch (err) {
         console.warn('⚠️  Order-placed email failed:', err?.message || err);
