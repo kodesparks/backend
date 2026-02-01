@@ -625,12 +625,22 @@ export const confirmOrder = async (req, res) => {
   }
 };
 
-// Update order status manually (Admin override)
+// Update order status manually (Admin override). Optional: pass truck details in same request.
 export const updateOrderStatus = async (req, res) => {
   try {
     const { leadId } = req.params;
     const adminId = req.user.userId;
-    const { orderStatus, remarks = '' } = req.body || {};
+    const {
+      orderStatus,
+      remarks = '',
+      driverName,
+      driverPhone,
+      driverLicenseNo,
+      truckNumber,
+      vehicleType,
+      capacityTons,
+      deliveryNotes
+    } = req.body || {};
 
     if (!orderStatus) {
       return res.status(400).json({
@@ -677,6 +687,34 @@ export const updateOrderStatus = async (req, res) => {
       adminId,
       remarks || `Order status updated to ${orderStatus} by admin`
     );
+
+    // If admin sent truck details, save to delivery record (same as vendor flow)
+    const hasTruckDetails = [driverName, driverPhone, driverLicenseNo, truckNumber, vehicleType, capacityTons, deliveryNotes].some(
+      (v) => v !== undefined && v !== null && String(v).trim() !== ''
+    );
+    if (hasTruckDetails) {
+      let delivery = await OrderDelivery.findByOrder(leadId);
+      if (!delivery) {
+        delivery = await OrderDelivery.create({
+          leadId,
+          invcNum: order.invcNum,
+          userId: order.custUserId,
+          address: order.deliveryAddress || 'Address to be updated',
+          pincode: order.deliveryPincode || '000000',
+          deliveryExpectedDate: order.deliveryExpectedDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          deliveryStatus: 'pending'
+        });
+      }
+      await delivery.updateFleetInfo({
+        driverName: driverName || undefined,
+        driverPhone: driverPhone || undefined,
+        driverLicenseNo: driverLicenseNo || undefined,
+        truckNumber: truckNumber || undefined,
+        vehicleType: vehicleType || undefined,
+        capacityTons: capacityTons != null ? Number(capacityTons) : undefined,
+        deliveryNotes: deliveryNotes || undefined
+      });
+    }
 
     // Create Quote in Zoho Books when admin reviews order and creates quotation (background, non-blocking)
     // Step 2: Admin creates quotation → Create Quote in Zoho
@@ -755,13 +793,30 @@ export const updateOrderStatus = async (req, res) => {
       })();
     }
 
+    // Include delivery (truck) info in response when present
+    let deliveryInfo = null;
+    const deliveryRecord = await OrderDelivery.findByOrder(leadId);
+    if (deliveryRecord) {
+      deliveryInfo = {
+        deliveryStatus: deliveryRecord.deliveryStatus,
+        driverName: deliveryRecord.driverName,
+        driverPhone: deliveryRecord.driverPhone,
+        driverLicenseNo: deliveryRecord.driverLicenseNo,
+        truckNumber: deliveryRecord.truckNumber,
+        vehicleType: deliveryRecord.vehicleType,
+        capacityTons: deliveryRecord.capacityTons,
+        deliveryNotes: deliveryRecord.deliveryNotes
+      };
+    }
+
     res.status(200).json({
       message: 'Order status updated successfully',
       order: {
         leadId: order.leadId,
         orderStatus: order.orderStatus,
         totalAmount: order.totalAmount
-      }
+      },
+      deliveryInfo
     });
 
   } catch (error) {
@@ -878,18 +933,17 @@ export const updateDelivery = async (req, res) => {
     let delivery = await OrderDelivery.findByOrder(leadId);
 
     if (!delivery) {
-      // Create new delivery record
+      // Create new delivery record (userId required by schema – use customer for order link)
       delivery = await OrderDelivery.create({
         leadId,
         invcNum: order.invcNum,
-        custUserId: order.custUserId,
-        vendorId: order.vendorId,
-        address: order.deliveryAddress,
-        pincode: order.deliveryPincode,
+        userId: order.custUserId,
+        address: order.deliveryAddress || 'Address to be updated',
+        pincode: order.deliveryPincode || '000000',
+        deliveryExpectedDate: order.deliveryExpectedDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         deliveryStatus: deliveryStatus || 'pending',
-        trackingNumber,
-        courierService,
-        expectedDeliveryDate,
+        trackingNumber: trackingNumber || undefined,
+        courierService: courierService || undefined,
         driverName, driverPhone, driverLicenseNo, truckNumber, vehicleType,
         capacityTons, startTime, estimatedArrival,
         lastLocation: lastLocation || undefined,

@@ -684,7 +684,7 @@ router.post('/admin/orders/:leadId/confirm',
   confirmOrder
 );
 
-// Update order status manually
+// Update order status manually (optional: send truck details in same request)
 router.put('/admin/orders/:leadId/status',
   authenticateToken,
   requireRole(['admin']),
@@ -696,12 +696,19 @@ router.put('/admin/orders/:leadId/status',
     body('remarks')
       .optional()
       .isString()
-      .withMessage('Remarks must be a string')
+      .withMessage('Remarks must be a string'),
+    body('driverName').optional().isString(),
+    body('driverPhone').optional().matches(/^[0-9+\- ]{7,15}$/).withMessage('Valid phone format'),
+    body('driverLicenseNo').optional().isString(),
+    body('truckNumber').optional().isString(),
+    body('vehicleType').optional().isString(),
+    body('capacityTons').optional().isNumeric(),
+    body('deliveryNotes').optional().isString()
   ],
   updateOrderStatus
 );
 
-// Update delivery information
+// Update delivery information (including truck details)
 router.put('/admin/orders/:leadId/delivery',
   authenticateToken,
   requireRole(['admin']),
@@ -711,18 +718,16 @@ router.put('/admin/orders/:leadId/delivery',
       .optional()
       .isIn(['pending', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'failed', 'returned'])
       .withMessage('Valid delivery status is required'),
-    body('trackingNumber')
-      .optional()
-      .isString()
-      .withMessage('Tracking number must be a string'),
-    body('courierService')
-      .optional()
-      .isString()
-      .withMessage('Courier service must be a string'),
-    body('expectedDeliveryDate')
-      .optional()
-      .isISO8601()
-      .withMessage('Valid expected delivery date is required')
+    body('trackingNumber').optional().isString(),
+    body('courierService').optional().isString(),
+    body('expectedDeliveryDate').optional().isISO8601(),
+    body('driverName').optional().isString(),
+    body('driverPhone').optional().matches(/^[0-9+\- ]{7,15}$/),
+    body('driverLicenseNo').optional().isString(),
+    body('truckNumber').optional().isString(),
+    body('vehicleType').optional().isString(),
+    body('capacityTons').optional().isNumeric(),
+    body('deliveryNotes').optional().isString()
   ],
   updateDelivery
 );
