@@ -8,7 +8,7 @@ const otpSchema = new mongoose.Schema(
     },
     otp: {
       type: String,
-      required: true, // Hashed OTP when sent via email; legacy: 'engagelab-managed'
+      required: true, // Hashed OTP when sent via email
     },
     type: {
       type: String,
@@ -20,7 +20,7 @@ const otpSchema = new mongoose.Schema(
       default: false,
     },
     messageId: {
-      type: String, // Optional; was used for Engagelab, now OTP sent via Zoho email
+      type: String, // Optional; reserved for future use
       required: false,
     },
     createdAt: {

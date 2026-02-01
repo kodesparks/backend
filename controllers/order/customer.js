@@ -9,6 +9,7 @@ import geocodingService from '../../services/geocodingService.js';
 import distanceService from '../../services/distanceService.js';
 import WarehouseService from '../../services/warehouseService.js';
 import zohoBooksService from '../../utils/zohoBooks.js';
+import { sendOrderPlacedEmail } from '../../utils/emailService.js';
 import User from '../../models/User.js';
 
 // Add item to cart (Create order)
@@ -784,6 +785,31 @@ export const placeOrder = async (req, res) => {
     });
 
     await delivery.save();
+
+    // Send order-placed confirmation email from our side (SMTP)
+    (async () => {
+      try {
+        const customer = await User.findById(customerId).select('email name').lean();
+        if (customer?.email) {
+          await sendOrderPlacedEmail(
+            customer.email,
+            customer.name || 'Customer',
+            {
+              leadId: order.leadId,
+              formattedLeadId: order.formattedLeadId,
+              totalAmount: order.totalAmount,
+              deliveryAddress: order.deliveryAddress,
+              deliveryExpectedDate: order.deliveryExpectedDate,
+              itemCount: order.items?.length || 0
+            }
+          );
+        } else {
+          console.warn(`⚠️  Order-placed email skipped: no email for customer ${customerId}`);
+        }
+      } catch (err) {
+        console.warn('⚠️  Order-placed email failed:', err?.message || err);
+      }
+    })();
 
     // Create Quote (Estimate) in Zoho Books when order is placed – customer can download Quote PDF
     if (!order.zohoQuoteId) {

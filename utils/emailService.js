@@ -102,3 +102,45 @@ export async function sendOTPEmail(to, name, code) {
     return false;
   }
 }
+
+/**
+ * Send "Order placed" confirmation email from our side (SMTP).
+ * Use when customer places order – in addition to Zoho quote email if any.
+ * @param {string} to - Customer email
+ * @param {string} name - Customer name
+ * @param {Object} orderDetails - { leadId, formattedLeadId, totalAmount, deliveryAddress, deliveryExpectedDate, itemCount }
+ * @returns {Promise<boolean>} - true if sent, false otherwise
+ */
+export async function sendOrderPlacedEmail(to, name, orderDetails) {
+  const trans = getTransporter();
+  if (!trans) {
+    console.warn('⚠️  Order-placed email skipped: SMTP not configured (set SMTP_HOST, SMTP_USER, SMTP_PASS in .env).');
+    return false;
+  }
+  if (!to || !String(to).trim()) {
+    console.warn('⚠️  Order-placed email skipped: no customer email');
+    return false;
+  }
+  const { leadId, formattedLeadId, totalAmount, deliveryAddress, deliveryExpectedDate, itemCount } = orderDetails || {};
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER;
+  const subject = `Order placed – ${formattedLeadId || leadId || 'Order'}`;
+  const html = `
+    <p>Hi ${name || 'Customer'},</p>
+    <p>Your order has been placed successfully.</p>
+    <p><strong>Order ID:</strong> ${formattedLeadId || leadId || '–'}</p>
+    <p><strong>Total amount:</strong> ₹${typeof totalAmount === 'number' ? totalAmount.toLocaleString('en-IN') : totalAmount || '–'}</p>
+    ${itemCount ? `<p><strong>Items:</strong> ${itemCount}</p>` : ''}
+    ${deliveryAddress ? `<p><strong>Delivery address:</strong> ${deliveryAddress}</p>` : ''}
+    ${deliveryExpectedDate ? `<p><strong>Expected delivery:</strong> ${deliveryExpectedDate}</p>` : ''}
+    <p>You will receive a quote from the vendor shortly. You can also download the quote from your order page.</p>
+    <p>Thank you for your order.</p>
+  `;
+  try {
+    await trans.sendMail({ from, to, subject, html });
+    console.log(`✅ Order-placed email sent to ${to} for order ${leadId || '–'}`);
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to send order-placed email:', err.message);
+    return false;
+  }
+}

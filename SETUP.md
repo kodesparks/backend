@@ -27,9 +27,12 @@ MONGODB_URI=mongodb://localhost:27017/your-database-name
 PORT=5000
 NODE_ENV=development
 
-# Optional: Engagelab API (if using OTP functionality)
-ENGAGELAB_API_KEY=your-engagelab-api-key
-ENGAGELAB_API_URL=https://api.engagelab.com
+# Email (SMTP) – required for OTP verification at signup (e.g. Gmail SMTP)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+MAIL_FROM=no-reply@yourdomain.com
 ```
 
 ### 3. Start the Server
