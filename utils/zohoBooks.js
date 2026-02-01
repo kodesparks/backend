@@ -1013,6 +1013,14 @@ class ZohoBooksService {
   }
 
   /**
+   * Public: Sync contact email/phone and primary contact person in Zoho before sending quote/SO/invoice email.
+   * Call this before emailEstimate if Zoho returns "email not found" for the customer.
+   */
+  async syncContactForEmail(contactId, customer) {
+    return this._syncContactEmailToZoho(contactId, customer);
+  }
+
+  /**
    * Sync our User's email/phone to Zoho contact and ensure primary contact person exists
    * so Zoho shows "Primary contact information" and can send quote/SO/invoice emails.
    */

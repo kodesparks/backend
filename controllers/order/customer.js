@@ -9,7 +9,7 @@ import geocodingService from '../../services/geocodingService.js';
 import distanceService from '../../services/distanceService.js';
 import WarehouseService from '../../services/warehouseService.js';
 import zohoBooksService from '../../utils/zohoBooks.js';
-import { sendOrderPlacedEmail } from '../../utils/emailService.js';
+import { sendOrderPlacedEmail, sendQuoteReadyEmail } from '../../utils/emailService.js';
 import User from '../../models/User.js';
 
 // Add item to cart (Create order)
@@ -826,9 +826,23 @@ export const placeOrder = async (req, res) => {
               { $set: { zohoQuoteId: zohoQuote.estimate_id } }
             );
             console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId}`);
-            await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch((err) => {
+            // Sync contact email/primary contact in Zoho so quote email can be sent
+            if (customer.zohoCustomerId) {
+              await zohoBooksService.syncContactForEmail(customer.zohoCustomerId, customer).catch(() => {});
+            }
+            const emailSent = await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch((err) => {
               console.warn(`⚠️ Quote email failed for order ${order.leadId}:`, err?.message || err);
+              return false;
             });
+            // If Zoho could not send quote email (e.g. email not found in customer details), send from our SMTP
+            if (!emailSent && customer.email) {
+              await sendQuoteReadyEmail(
+                customer.email,
+                customer.name || 'Customer',
+                order.leadId,
+                order.formattedLeadId
+              ).catch(() => {});
+            }
           }
         } catch (error) {
           console.error(`❌ Failed to create Zoho Quote for order ${order.leadId}:`, error.message);

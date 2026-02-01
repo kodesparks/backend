@@ -144,3 +144,38 @@ export async function sendOrderPlacedEmail(to, name, orderDetails) {
     return false;
   }
 }
+
+/**
+ * Fallback: send "Quote ready" email from our SMTP when Zoho quote email fails
+ * (e.g. "email not found in customer details"). Customer can log in to download quote.
+ * @param {string} to - Customer email
+ * @param {string} name - Customer name
+ * @param {string} leadId - Order/lead ID (e.g. CT-084)
+ * @param {string} formattedLeadId - Formatted order ID for display
+ * @returns {Promise<boolean>}
+ */
+export async function sendQuoteReadyEmail(to, name, leadId, formattedLeadId) {
+  const trans = getTransporter();
+  if (!trans || !to || !String(to).trim()) {
+    return false;
+  }
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER;
+  const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/$/, '');
+  const orderUrl = frontendUrl ? `${frontendUrl}/orders` : 'your account';
+  const subject = `Quote ready – ${formattedLeadId || leadId || 'Order'}`;
+  const html = `
+    <p>Hi ${name || 'Customer'},</p>
+    <p>Your quote for order <strong>${formattedLeadId || leadId || '–'}</strong> is ready.</p>
+    <p>Please log in to your account to view and download the quote.</p>
+    ${orderUrl !== 'your account' ? `<p><a href="${orderUrl}" style="color:#2563eb;">View my orders</a></p>` : ''}
+    <p>Thank you.</p>
+  `;
+  try {
+    await trans.sendMail({ from, to, subject, html });
+    console.log(`✅ Quote-ready email (fallback) sent to ${to} for order ${leadId || '–'}`);
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to send quote-ready email:', err.message);
+    return false;
+  }
+}
