@@ -805,8 +805,8 @@ export const updateOrderStatus = async (req, res) => {
       })();
     }
 
-    // Create Invoice in Zoho only when order status is set to out_for_delivery (if not already created)
-    if (orderStatus === 'out_for_delivery' && !order.zohoInvoiceId) {
+    // Create Invoice in Zoho when order status is in_transit or out_for_delivery (if not already created)
+    if ((orderStatus === 'in_transit' || orderStatus === 'out_for_delivery') && !order.zohoInvoiceId) {
       (async () => {
         try {
           const currentOrder = await Order.findById(order._id);
@@ -1233,7 +1233,7 @@ export const downloadInvoicePDF = async (req, res) => {
   try {
     const { leadId } = req.params;
 
-    const order = await Order.findOne({
+    let order = await Order.findOne({
       leadId,
       isActive: true
     });
@@ -1242,8 +1242,48 @@ export const downloadInvoicePDF = async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    // Create Invoice on-demand if missing (when order is in_transit or out_for_delivery)
+    const invoiceEligibleStatuses = ['in_transit', 'shipped', 'out_for_delivery', 'delivered'];
+    if (!order.zohoInvoiceId && invoiceEligibleStatuses.includes(order.orderStatus)) {
+      const customer = await User.findById(order.custUserId);
+      const populatedOrder = await Order.findById(order._id)
+        .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+      let payment = await OrderPayment.findByInvoice(order.invcNum);
+      if (!payment) {
+        payment = await OrderPayment.create({
+          invcNum: order.invcNum,
+          orderAmount: order.totalAmount,
+          paidAmount: order.totalAmount,
+          paymentType: 'bank_transfer',
+          paymentMode: 'offline',
+          paymentStatus: 'successful',
+          transactionId: `INV-${Date.now()}`
+        });
+      }
+      const vendor = order.vendorId ? await User.findById(order.vendorId) : null;
+      if (customer) {
+        try {
+          const zohoInvoice = await zohoBooksService.createInvoice(populatedOrder, payment, vendor, customer);
+          if (zohoInvoice?.invoice_id) {
+            await Order.updateOne({ _id: order._id }, { $set: { zohoInvoiceId: zohoInvoice.invoice_id } });
+            order.zohoInvoiceId = zohoInvoice.invoice_id;
+            await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch(() => {});
+            console.log(`✅ Invoice created on-demand for order ${order.leadId} (admin PDF request)`);
+          }
+        } catch (err) {
+          console.error('Download Invoice PDF – create on-demand failed:', err.message);
+          return res.status(503).json({
+            message: 'Invoice could not be generated right now. Please try again in a moment.',
+            error: err.message
+          });
+        }
+      }
+    }
+
     if (!order.zohoInvoiceId) {
-      return res.status(404).json({ message: 'Invoice not found in Zoho Books' });
+      return res.status(404).json({
+        message: 'Invoice not found in Zoho Books. It is created when order is in transit or out for delivery.'
+      });
     }
 
     const pdfBuffer = await zohoBooksService.getInvoicePDF(order.zohoInvoiceId);

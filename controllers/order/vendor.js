@@ -319,6 +319,29 @@ export const updateDeliveryTracking = async (req, res) => {
         vendorId,
         'Order shipped and in transit'
       );
+      // Create Invoice in Zoho when delivery is in_transit (if not already created)
+      (async () => {
+        try {
+          let currentOrder = await Order.findById(order._id);
+          if (!currentOrder || currentOrder.zohoInvoiceId) return;
+          const populatedOrder = await Order.findById(currentOrder._id)
+            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+          const payment = await OrderPayment.findByInvoice(currentOrder.invcNum);
+          const vendorUser = currentOrder.vendorId ? await User.findById(currentOrder.vendorId) : null;
+          const customer = await User.findById(currentOrder.custUserId);
+          const zohoInvoice = await zohoBooksService.createInvoice(populatedOrder, payment, vendorUser, customer);
+          if (zohoInvoice?.invoice_id) {
+            currentOrder.zohoInvoiceId = zohoInvoice.invoice_id;
+            await currentOrder.save();
+            console.log(`✅ Zoho Invoice created: ${zohoInvoice.invoice_id} for order ${currentOrder.leadId} (in_transit)`);
+            await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch((err) => {
+              console.warn(`⚠️ Invoice email failed for order ${currentOrder.leadId}:`, err?.message || err);
+            });
+          }
+        } catch (error) {
+          console.error(`❌ Zoho Invoice for order ${order.leadId}:`, error.message);
+        }
+      })();
     } else if (deliveryStatus === 'out_for_delivery') {
       await order.updateStatus('shipped');
       await OrderStatus.createStatusUpdate(
@@ -330,8 +353,7 @@ export const updateDeliveryTracking = async (req, res) => {
         'Order out for delivery'
       );
 
-      // Step 5: Only at out_for_delivery → Create Invoice (if not exists) then E-Way Bill in Zoho Books (background, non-blocking)
-      // Invoice and E-Way Bill are generated only when delivery status is out_for_delivery, NOT at in_transit or shipped.
+      // Step 5: At out_for_delivery → Create Invoice (if not already created at in_transit) then E-Way Bill in Zoho Books (background, non-blocking)
       (async () => {
         try {
           let currentOrder = order;
