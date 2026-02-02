@@ -9,14 +9,14 @@ dotenv.config();
  * Handles all Zoho Books API integrations.
  *
  * FLOW:
- * 1. Customer places order
- * 2. Admin/Vendor creates quotation → Create Quote in Zoho → Email quote to customer (Zoho Books email API)
- * 3. Payment done (our app) → no Zoho Invoice yet
- * 4. Admin/Vendor generates SO → Create Sales Order in Zoho → Email SO to customer (Zoho Books email API)
- * 5. Vendor sets delivery to in_transit or out_for_delivery → Create Invoice in Zoho, then E-Way Bill (if applicable)
- * 6. Payment receipt in Zoho: markInvoiceAsPaid when payment is already successful (e.g. after step 5)
+ * 1. Customer places order → Our SMTP sends order-placed email only (no Zoho quote yet).
+ * 2. Order accepted (vendor_accepted) → Our SMTP sends order-accepted email only (no quote, no SO).
+ * 3. Order confirmed (order_confirmed) → Create Quote in Zoho → Email quote to customer (Zoho Books API or our SMTP fallback).
+ * 4. Payment done (payment_done) → Create Sales Order in Zoho → Email SO to customer (Zoho Books API).
+ * 5. Vendor sets delivery to in_transit or out_for_delivery → Create Invoice in Zoho, then E-Way Bill (if applicable).
+ * 6. Payment receipt in Zoho: markInvoiceAsPaid when payment is already successful (e.g. after step 5).
  *
- * Email: Quote and Sales Order are emailed via Zoho Books API. SMS is not integrated (Zoho Books has no public SMS API for estimates/SO).
+ * Email: Quote and SO are emailed via Zoho Books API (or our SMTP fallback for quote). SMS is not integrated.
  * Note: Purchase Orders are created manually in Zoho dashboard.
  */
 

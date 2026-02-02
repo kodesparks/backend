@@ -4,6 +4,7 @@ import OrderDelivery from '../../models/OrderDelivery.js';
 import OrderPayment from '../../models/OrderPayment.js';
 import { validationResult } from 'express-validator';
 import zohoBooksService from '../../utils/zohoBooks.js';
+import { sendOrderAcceptedEmail } from '../../utils/emailService.js';
 import User from '../../models/User.js';
 
 // Get vendor's orders
@@ -152,57 +153,21 @@ export const acceptOrder = async (req, res) => {
       remarks || 'Order accepted by vendor'
     );
 
-    // Create Quote in Zoho Books if not already created (background, non-blocking)
-    // Step 2: Admin creates quotation → Create Quote in Zoho
-    // Quote should be created when order is accepted (by admin or vendor)
-    if (!order.zohoQuoteId) {
-      (async () => {
-        try {
-          const customer = await User.findById(order.custUserId);
-          const populatedOrder = await Order.findById(order._id)
-            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
-          
-          const zohoQuote = await zohoBooksService.createQuote(populatedOrder, customer);
-          if (zohoQuote?.estimate_id) {
-            order.zohoQuoteId = zohoQuote.estimate_id;
-            await order.save();
-            console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId}`);
-            await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch((err) => {
-              console.warn(`⚠️ Quote email failed for order ${order.leadId}:`, err?.message || err);
-            });
-          }
-        } catch (error) {
-          console.error(`❌ Failed to create Zoho Quote for order ${order.leadId}:`, error.message);
-          // Don't fail the main request if Zoho integration fails
+    // When vendor accepts: send order-accepted email only. Quote created when order is CONFIRMED; SO when PAYMENT DONE.
+    (async () => {
+      try {
+        const customer = await User.findById(order.custUserId).select('email name').lean();
+        if (customer?.email) {
+          await sendOrderAcceptedEmail(
+            customer.email,
+            customer.name || 'Customer',
+            { leadId: order.leadId, formattedLeadId: order.formattedLeadId }
+          ).catch(() => {});
         }
-      })();
-    }
-
-    // Create Sales Order in Zoho Books (background, non-blocking)
-    // Step 4: Admin generates SO → Create Sales Order in Zoho
-    if (!order.zohoSalesOrderId) {
-      (async () => {
-        try {
-          const vendor = await User.findById(vendorId);
-          const customer = await User.findById(order.custUserId);
-          const populatedOrder = await Order.findById(order._id)
-            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
-          
-          const zohoSO = await zohoBooksService.createSalesOrder(populatedOrder, vendor, customer);
-          if (zohoSO?.salesorder_id) {
-            order.zohoSalesOrderId = zohoSO.salesorder_id;
-            await order.save();
-            console.log(`✅ Zoho Sales Order created: ${zohoSO.salesorder_id} for order ${order.leadId}`);
-            await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch((err) => {
-              console.warn(`⚠️ Sales Order email failed for order ${order.leadId}:`, err?.message || err);
-            });
-          }
-        } catch (error) {
-          console.error(`❌ Failed to create Zoho Sales Order for order ${order.leadId}:`, error.message);
-          // Don't fail the main request if Zoho integration fails
-        }
-      })();
-    }
+      } catch (err) {
+        console.warn('⚠️ Order-accepted email failed:', err?.message || err);
+      }
+    })();
 
     res.status(200).json({
       message: 'Order accepted successfully',

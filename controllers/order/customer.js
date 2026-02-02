@@ -9,7 +9,7 @@ import geocodingService from '../../services/geocodingService.js';
 import distanceService from '../../services/distanceService.js';
 import WarehouseService from '../../services/warehouseService.js';
 import zohoBooksService from '../../utils/zohoBooks.js';
-import { sendOrderPlacedEmail, sendQuoteReadyEmail } from '../../utils/emailService.js';
+import { sendOrderPlacedEmail } from '../../utils/emailService.js';
 import User from '../../models/User.js';
 
 // Add item to cart (Create order)
@@ -813,44 +813,7 @@ export const placeOrder = async (req, res) => {
       }
     })();
 
-    // Create Quote (Estimate) in Zoho Books when order is placed – customer can download Quote PDF
-    if (!order.zohoQuoteId) {
-      (async () => {
-        try {
-          const customer = await User.findById(customerId);
-          const populatedOrder = await Order.findById(order._id)
-            .populate('items.itemCode', 'itemDescription category subCategory units pricing zohoItemId');
-          if (!customer) return;
-          const zohoQuote = await zohoBooksService.createQuote(populatedOrder, customer);
-          if (zohoQuote?.estimate_id) {
-            await Order.updateOne(
-              { _id: order._id },
-              { $set: { zohoQuoteId: zohoQuote.estimate_id } }
-            );
-            console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId}`);
-            // Sync contact email/primary contact in Zoho so quote email can be sent
-            if (customer.zohoCustomerId) {
-              await zohoBooksService.syncContactForEmail(customer.zohoCustomerId, customer).catch(() => {});
-            }
-            const emailSent = await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch((err) => {
-              console.warn(`⚠️ Quote email failed for order ${order.leadId}:`, err?.message || err);
-              return false;
-            });
-            // If Zoho could not send quote email (e.g. email not found in customer details), send from our SMTP
-            if (!emailSent && customer.email) {
-              await sendQuoteReadyEmail(
-                customer.email,
-                customer.name || 'Customer',
-                order.leadId,
-                order.formattedLeadId
-              ).catch(() => {});
-            }
-          }
-        } catch (error) {
-          console.error(`❌ Failed to create Zoho Quote for order ${order.leadId}:`, error.message);
-        }
-      })();
-    }
+    // Quote is created when order is CONFIRMED (order_confirmed), not on place. See admin updateOrderStatus.
 
     res.status(200).json({
       message: 'Order placed successfully',
@@ -931,6 +894,25 @@ export const processPayment = async (req, res) => {
           'Payment processed successfully'
         );
 
+        // When payment_done: create Sales Order (Zoho SO) and email it
+        const currentOrder = await Order.findById(order._id);
+        if (currentOrder && !currentOrder.zohoSalesOrderId) {
+          try {
+            const vendor = currentOrder.vendorId ? await User.findById(currentOrder.vendorId) : null;
+            const customer = await User.findById(currentOrder.custUserId);
+            const populatedOrder = await Order.findById(order._id)
+              .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+            const zohoSO = await zohoBooksService.createSalesOrder(populatedOrder, vendor, customer);
+            if (zohoSO?.salesorder_id) {
+              await Order.updateOne({ _id: order._id }, { $set: { zohoSalesOrderId: zohoSO.salesorder_id } });
+              console.log(`✅ Zoho Sales Order created: ${zohoSO.salesorder_id} for order ${order.leadId}`);
+              await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch(() => {});
+            }
+          } catch (err) {
+            console.error(`❌ Failed to create Zoho Sales Order for order ${order.leadId}:`, err?.message || err);
+          }
+        }
+
         // Update to order confirmed
         await order.updateStatus('order_confirmed');
         
@@ -942,6 +924,29 @@ export const processPayment = async (req, res) => {
           customerId,
           'Order confirmed after successful payment'
         );
+
+        // When order_confirmed: create Quote (Zoho estimate) and email it
+        const orderAfterConfirm = await Order.findById(order._id);
+        if (orderAfterConfirm && !orderAfterConfirm.zohoQuoteId) {
+          try {
+            const customer = await User.findById(order.custUserId);
+            const populatedOrder = await Order.findById(order._id)
+              .populate('items.itemCode', 'itemDescription category subCategory units pricing zohoItemId');
+            if (customer) {
+              const zohoQuote = await zohoBooksService.createQuote(populatedOrder, customer);
+              if (zohoQuote?.estimate_id) {
+                await Order.updateOne({ _id: order._id }, { $set: { zohoQuoteId: zohoQuote.estimate_id } });
+                console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId}`);
+                if (customer.zohoCustomerId) {
+                  await zohoBooksService.syncContactForEmail(customer.zohoCustomerId, customer).catch(() => {});
+                }
+                await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
+              }
+            }
+          } catch (err) {
+            console.error(`❌ Failed to create Zoho Quote for order ${order.leadId}:`, err?.message || err);
+          }
+        }
 
         // Invoice is created in Zoho only at delivery status (in_transit/out_for_delivery), not at payment_done.
 

@@ -144,6 +144,36 @@ export async function sendOrderPlacedEmail(to, name, orderDetails) {
 }
 
 /**
+ * Send "Order accepted" email from our SMTP when order is accepted (vendor_accepted).
+ * No quote generated yet – quote is generated when order is confirmed.
+ * @param {string} to - Customer email
+ * @param {string} name - Customer name
+ * @param {Object} orderDetails - { leadId, formattedLeadId }
+ * @returns {Promise<boolean>}
+ */
+export async function sendOrderAcceptedEmail(to, name, orderDetails) {
+  const trans = getTransporter();
+  if (!trans || !to || !String(to).trim()) return false;
+  const { leadId, formattedLeadId } = orderDetails || {};
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER;
+  const subject = `Order accepted – ${formattedLeadId || leadId || 'Order'}`;
+  const html = `
+    <p>Hi ${name || 'Customer'},</p>
+    <p>Your order <strong>${formattedLeadId || leadId || '–'}</strong> has been accepted.</p>
+    <p>You will receive the quotation once the order is confirmed. You can then proceed to payment.</p>
+    <p>Thank you.</p>
+  `;
+  try {
+    await trans.sendMail({ from, to, subject, html });
+    console.log(`✅ Order-accepted email sent to ${to} for order ${leadId || '–'}`);
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to send order-accepted email:', err.message);
+    return false;
+  }
+}
+
+/**
  * Fallback: send "Quote ready" email from our SMTP when Zoho quote email fails
  * (e.g. "email not found in customer details"). Customer can log in to download quote.
  * @param {string} to - Customer email
