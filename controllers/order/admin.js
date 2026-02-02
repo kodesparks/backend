@@ -1163,12 +1163,12 @@ export const downloadSalesOrderPDF = async (req, res) => {
   }
 };
 
-// Download Quote PDF (Admin)
+// Download Quote PDF (Admin) – creates Quote in Zoho on-demand if missing (when order is accepted/confirmed)
 export const downloadQuotePDF = async (req, res) => {
   try {
     const { leadId } = req.params;
 
-    const order = await Order.findOne({
+    let order = await Order.findOne({
       leadId,
       isActive: true
     });
@@ -1177,8 +1177,41 @@ export const downloadQuotePDF = async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    // Create Quote on-demand if missing (when order is accepted or confirmed)
+    const quoteEligibleStatuses = ['vendor_accepted', 'order_confirmed', 'payment_done', 'truck_loading', 'in_transit', 'shipped', 'out_for_delivery', 'delivered'];
+    if (!order.zohoQuoteId && quoteEligibleStatuses.includes(order.orderStatus)) {
+      const customer = await User.findById(order.custUserId);
+      const populatedOrder = await Order.findById(order._id)
+        .populate('items.itemCode', 'itemDescription category subCategory units pricing zohoItemId');
+      if (customer) {
+        try {
+          const zohoQuote = await zohoBooksService.createQuote(populatedOrder, customer);
+          if (zohoQuote?.estimate_id) {
+            await Order.updateOne({ _id: order._id }, { $set: { zohoQuoteId: zohoQuote.estimate_id } });
+            order.zohoQuoteId = zohoQuote.estimate_id;
+            if (customer.zohoCustomerId) {
+              await zohoBooksService.syncContactForEmail(customer.zohoCustomerId, customer).catch(() => {});
+            }
+            const emailSent = await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => false);
+            if (!emailSent && customer.email) {
+              await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId || order.leadId).catch(() => {});
+            }
+            console.log(`✅ Quote created on-demand for order ${order.leadId} (admin PDF request)`);
+          }
+        } catch (err) {
+          console.error('Download Quote PDF – create on-demand failed:', err.message);
+          return res.status(503).json({
+            message: 'Quote could not be generated right now. Please try again in a moment.',
+            error: err.message
+          });
+        }
+      }
+    }
+
     if (!order.zohoQuoteId) {
-      return res.status(404).json({ message: 'Quote not found in Zoho Books' });
+      return res.status(404).json({
+        message: 'Quote is not available yet. It is generated when the order is confirmed (status: vendor_accepted or order_confirmed).'
+      });
     }
 
     const pdfBuffer = await zohoBooksService.getQuotePDF(order.zohoQuoteId);
