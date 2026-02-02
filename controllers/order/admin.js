@@ -757,6 +757,7 @@ export const updateOrderStatus = async (req, res) => {
 
     // When order is CONFIRMED (order_confirmed): create Quote (Zoho estimate) and email it
     if (orderStatus === 'order_confirmed' && !order.zohoQuoteId) {
+      console.log(`📋 Order status set to order_confirmed – creating Zoho Quote for ${order.leadId}`);
       (async () => {
         try {
           const customer = await User.findById(order.custUserId);
