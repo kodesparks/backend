@@ -281,18 +281,35 @@ class ZohoBooksService {
   }
 
   /**
-   * Stricter truncation for Sales Order create – Zoho returns "billing_address has less than 100 characters"
-   * when the combined or single field exceeds their limit. Use short limits so create never fails.
+   * Stricter truncation for Sales Order create – Zoho returns "billing_address has less than 100 characters".
+   * Docs imply the whole billing_address block is validated; enforce combined address+city+state <= 99 chars.
    */
   _truncateAddressForSalesOrderCreate(addr) {
     if (!addr || typeof addr !== 'object') return addr;
-    const out = { ...addr, country: addr.country || 'India' };
-    const addressMax = 50;  // single line under 50 so total with city/state stays under 100
-    const cityStateMax = 30;
-    if (out.address && out.address.length > addressMax) out.address = out.address.substring(0, addressMax);
-    if (out.city && out.city.length > cityStateMax) out.city = out.city.substring(0, cityStateMax);
-    if (out.state && out.state.length > cityStateMax) out.state = out.state.substring(0, cityStateMax);
+    const TOTAL_MAX = 99;
+    const out = {
+      address: (addr.address || '').trim(),
+      city: (addr.city || '').trim(),
+      state: (addr.state || '').trim(),
+      zip: (addr.zip || '').trim() || undefined,
+      country: addr.country || 'India'
+    };
     if (out.zip && out.zip.length > 20) out.zip = out.zip.substring(0, 20);
+    let total = (out.address.length || 0) + (out.city.length || 0) + (out.state.length || 0);
+    if (total <= TOTAL_MAX) return out;
+    // Trim from address first, then city, then state until total <= 99
+    const maxAddr = Math.min(out.address.length, Math.max(0, TOTAL_MAX - out.city.length - out.state.length));
+    out.address = out.address.substring(0, maxAddr);
+    total = out.address.length + out.city.length + out.state.length;
+    if (total > TOTAL_MAX) {
+      const maxCity = Math.min(out.city.length, Math.max(0, TOTAL_MAX - out.address.length - out.state.length));
+      out.city = out.city.substring(0, maxCity);
+      total = out.address.length + out.city.length + out.state.length;
+    }
+    if (total > TOTAL_MAX) {
+      const maxState = Math.min(out.state.length, Math.max(0, TOTAL_MAX - out.address.length - out.city.length));
+      out.state = out.state.substring(0, maxState);
+    }
     return out;
   }
 
@@ -633,12 +650,9 @@ class ZohoBooksService {
         salesOrderData.shipping_charge = String(order.deliveryCharges.toFixed(2));
       }
       
-      // Add billing and shipping addresses – use strict truncation for create (Zoho rejects if over 100 chars)
-      if (deliveryAddr) {
-        const safeAddr = this._truncateAddressForSalesOrderCreate(deliveryAddr);
-        salesOrderData.billing_address = safeAddr;
-        salesOrderData.shipping_address = safeAddr;
-      }
+      // Do NOT send billing_address/shipping_address on create – Zoho rejects with
+      // "billing_address has less than 100 characters" (they validate the whole block).
+      // We create the SO first, then set addresses via PUT so create never fails.
       
       console.log('📤 Creating Sales Order in Zoho:', JSON.stringify(salesOrderData, null, 2));
       const response = await this.makeRequest('POST', 'salesorders', salesOrderData);
