@@ -78,6 +78,16 @@ const orderSchema = new mongoose.Schema({
     default: '000000',
     match: /^[1-9][0-9]{5}$|^000000$/
   },
+  deliveryCity: {
+    type: String,
+    required: false,
+    default: ''
+  },
+  deliveryState: {
+    type: String,
+    required: false,
+    default: ''
+  },
   deliveryExpectedDate: {
     type: Date,
     required: false,

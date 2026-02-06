@@ -4,7 +4,7 @@ import OrderDelivery from '../../models/OrderDelivery.js';
 import OrderPayment from '../../models/OrderPayment.js';
 import { validationResult } from 'express-validator';
 import zohoBooksService from '../../utils/zohoBooks.js';
-import { sendOrderAcceptedEmail } from '../../utils/emailService.js';
+import { sendOrderAcceptedEmail, sendInvoiceReadyEmail } from '../../utils/emailService.js';
 import User from '../../models/User.js';
 
 // Get vendor's orders
@@ -335,8 +335,12 @@ export const updateDeliveryTracking = async (req, res) => {
             await currentOrder.save();
             console.log(`✅ Zoho Invoice created: ${zohoInvoice.invoice_id} for order ${currentOrder.leadId} (in_transit)`);
             await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch((err) => {
-              console.warn(`⚠️ Invoice email failed for order ${currentOrder.leadId}:`, err?.message || err);
+              console.warn(`⚠️ Invoice email (Zoho) failed for order ${currentOrder.leadId}:`, err?.message || err);
             });
+            if (customer?.email) {
+              const pdfUrl = await zohoBooksService.getInvoicePDFUrl(zohoInvoice.invoice_id).catch(() => null);
+              await sendInvoiceReadyEmail(customer.email, customer.name || 'Customer', currentOrder.leadId, currentOrder.formattedLeadId, pdfUrl).catch(() => {});
+            }
           }
         } catch (error) {
           console.error(`❌ Zoho Invoice for order ${order.leadId}:`, error.message);
@@ -370,8 +374,12 @@ export const updateDeliveryTracking = async (req, res) => {
               await currentOrder.save();
               console.log(`✅ Zoho Invoice created: ${zohoInvoice.invoice_id} for order ${currentOrder.leadId}`);
               await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch((err) => {
-                console.warn(`⚠️ Invoice email failed for order ${currentOrder.leadId}:`, err?.message || err);
+                console.warn(`⚠️ Invoice email (Zoho) failed for order ${currentOrder.leadId}:`, err?.message || err);
               });
+              if (customer?.email) {
+                const pdfUrl = await zohoBooksService.getInvoicePDFUrl(zohoInvoice.invoice_id).catch(() => null);
+                await sendInvoiceReadyEmail(customer.email, customer.name || 'Customer', currentOrder.leadId, currentOrder.formattedLeadId, pdfUrl).catch(() => {});
+              }
             }
           }
           // 2) Create E-Way Bill if we have invoice and not already created
@@ -637,8 +645,12 @@ export const updateVendorOrderStatus = async (req, res) => {
             await currentOrder.save();
             console.log(`✅ Zoho Invoice created: ${zohoInvoice.invoice_id} for order ${currentOrder.leadId}`);
             await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch((err) => {
-              console.warn(`⚠️ Invoice email failed for order ${currentOrder.leadId}:`, err?.message || err);
+              console.warn(`⚠️ Invoice email (Zoho) failed for order ${currentOrder.leadId}:`, err?.message || err);
             });
+            if (customer?.email) {
+              const pdfUrl = await zohoBooksService.getInvoicePDFUrl(zohoInvoice.invoice_id).catch(() => null);
+              await sendInvoiceReadyEmail(customer.email, customer.name || 'Customer', currentOrder.leadId, currentOrder.formattedLeadId, pdfUrl).catch(() => {});
+            }
           }
         } catch (err) {
           console.error(`❌ Zoho Invoice for order ${order.leadId}:`, err.message);

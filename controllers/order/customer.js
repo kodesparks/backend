@@ -9,7 +9,7 @@ import geocodingService from '../../services/geocodingService.js';
 import distanceService from '../../services/distanceService.js';
 import WarehouseService from '../../services/warehouseService.js';
 import zohoBooksService from '../../utils/zohoBooks.js';
-import { sendOrderPlacedEmail, sendQuoteReadyEmail } from '../../utils/emailService.js';
+import { sendOrderPlacedEmail, sendQuoteReadyEmail, sendSalesOrderReadyEmail, sendInvoiceReadyEmail } from '../../utils/emailService.js';
 import User from '../../models/User.js';
 
 // Add item to cart (Create order)
@@ -549,9 +549,9 @@ export const downloadQuotePDF = async (req, res) => {
             if (customer.zohoCustomerId) {
               await zohoBooksService.syncContactForEmail(customer.zohoCustomerId, customer).catch(() => {});
             }
-            const emailSent = await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => false);
-            if (!emailSent && customer.email) {
-              const pdfUrl = emailSent?.pdfUrl || await zohoBooksService.getQuotePDFUrl(zohoQuote.estimate_id).catch(() => null);
+            await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => false);
+            if (customer.email) {
+              const pdfUrl = await zohoBooksService.getQuotePDFUrl(zohoQuote.estimate_id).catch(() => null);
               await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Quote created on-demand for order ${order.leadId} (customer PDF request)`);
@@ -662,6 +662,10 @@ export const downloadInvoicePDF = async (req, res) => {
             await Order.updateOne({ _id: order._id }, { $set: { zohoInvoiceId: zohoInvoice.invoice_id } });
             order.zohoInvoiceId = zohoInvoice.invoice_id;
             await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch(() => {});
+            if (customer.email) {
+              const pdfUrl = await zohoBooksService.getInvoicePDFUrl(zohoInvoice.invoice_id).catch(() => null);
+              await sendInvoiceReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
+            }
             console.log(`✅ Invoice created on-demand for order ${order.leadId} (customer PDF request)`);
           }
         } catch (err) {
@@ -803,7 +807,7 @@ export const placeOrder = async (req, res) => {
 
     const { leadId } = req.params;
     const customerId = req.user.userId;
-    const { deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, email: payloadEmail, receiverName: payloadReceiverName } = req.body;
+    const { deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, email: payloadEmail, receiverName: payloadReceiverName, city: deliveryCity, state: deliveryState } = req.body;
 
     const order = await Order.findOne({
       leadId,
@@ -827,6 +831,8 @@ export const placeOrder = async (req, res) => {
     // Update delivery information
     order.deliveryAddress = deliveryAddress;
     order.deliveryPincode = deliveryPincode;
+    if (deliveryCity != null && String(deliveryCity).trim()) order.deliveryCity = String(deliveryCity).trim();
+    if (deliveryState != null && String(deliveryState).trim()) order.deliveryState = String(deliveryState).trim();
     order.deliveryExpectedDate = deliveryExpectedDate;
     order.receiverMobileNum = receiverMobileNum;
     
@@ -979,6 +985,10 @@ export const processPayment = async (req, res) => {
               await Order.updateOne({ _id: order._id }, { $set: { zohoSalesOrderId: zohoSO.salesorder_id } });
               console.log(`✅ Zoho Sales Order created: ${zohoSO.salesorder_id} for order ${order.leadId}`);
               await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch(() => {});
+              if (customer?.email) {
+                const pdfUrl = await zohoBooksService.getSalesOrderPDFUrl(zohoSO.salesorder_id).catch(() => null);
+                await sendSalesOrderReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+              }
             }
           } catch (err) {
             console.error(`❌ Failed to create Zoho Sales Order for order ${order.leadId}:`, err?.message || err);
@@ -1013,6 +1023,10 @@ export const processPayment = async (req, res) => {
                   await zohoBooksService.syncContactForEmail(customer.zohoCustomerId, customer).catch(() => {});
                 }
                 await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
+                if (customer.email) {
+                  const pdfUrl = await zohoBooksService.getQuotePDFUrl(zohoQuote.estimate_id).catch(() => null);
+                  await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+                }
               }
             }
           } catch (err) {

@@ -174,8 +174,8 @@ export async function sendOrderAcceptedEmail(to, name, orderDetails) {
 }
 
 /**
- * Fallback: send "Quote ready" email from our SMTP when Zoho quote email fails
- * (e.g. "email not found in customer details"). Customer can log in to download quote.
+ * Send "Quote ready" email from our SMTP (always send for every quote generated).
+ * Includes public PDF URL when available.
  * @param {string} to - Customer email
  * @param {string} name - Customer name
  * @param {string} leadId - Order/lead ID (e.g. CT-084)
@@ -195,17 +195,75 @@ export async function sendQuoteReadyEmail(to, name, leadId, formattedLeadId, pdf
   const html = `
     <p>Hi ${name || 'Customer'},</p>
     <p>Your quote for order <strong>${formattedLeadId || leadId || '–'}</strong> is ready.</p>
-    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Quote PDF</a></p>` : ''}
+    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Quote PDF</a></p><p>Or copy: ${pdfUrl}</p>` : ''}
     <p>Please log in to your account to view and download the quote.</p>
     ${orderUrl !== 'your account' ? `<p><a href="${orderUrl}" style="color:#2563eb;">View my orders</a></p>` : ''}
     <p>Thank you.</p>
   `;
   try {
     await trans.sendMail({ from, to, subject, html });
-    console.log(`✅ Quote-ready email (fallback) sent to ${to} for order ${leadId || '–'}${pdfUrl ? ` (PDF URL included)` : ''}`);
+    console.log(`✅ Quote-ready email (our SMTP) sent to ${to} for order ${leadId || '–'}${pdfUrl ? ' (PDF URL included)' : ''}`);
     return true;
   } catch (err) {
     console.error('❌ Failed to send quote-ready email:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Send "Sales Order ready" email from our SMTP (always send for every sales order generated).
+ * Includes public PDF URL when available.
+ */
+export async function sendSalesOrderReadyEmail(to, name, leadId, formattedLeadId, pdfUrl = null) {
+  const trans = getTransporter();
+  if (!trans || !to || !String(to).trim()) return false;
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER;
+  const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/$/, '');
+  const orderUrl = frontendUrl ? `${frontendUrl}/orders` : 'your account';
+  const subject = `Sales Order – ${formattedLeadId || leadId || 'Order'}`;
+  const html = `
+    <p>Hi ${name || 'Customer'},</p>
+    <p>Your sales order for <strong>${formattedLeadId || leadId || '–'}</strong> is ready.</p>
+    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Sales Order PDF</a></p><p>Or copy: ${pdfUrl}</p>` : ''}
+    <p>You can also log in to your account to view and download.</p>
+    ${orderUrl !== 'your account' ? `<p><a href="${orderUrl}" style="color:#2563eb;">View my orders</a></p>` : ''}
+    <p>Thank you.</p>
+  `;
+  try {
+    await trans.sendMail({ from, to, subject, html });
+    console.log(`✅ Sales-order-ready email (our SMTP) sent to ${to} for order ${leadId || '–'}${pdfUrl ? ' (PDF URL included)' : ''}`);
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to send sales-order-ready email:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Send "Invoice ready" email from our SMTP (always send for every invoice generated).
+ * Includes public PDF URL when available.
+ */
+export async function sendInvoiceReadyEmail(to, name, leadId, formattedLeadId, pdfUrl = null) {
+  const trans = getTransporter();
+  if (!trans || !to || !String(to).trim()) return false;
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER;
+  const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/$/, '');
+  const orderUrl = frontendUrl ? `${frontendUrl}/orders` : 'your account';
+  const subject = `Invoice – ${formattedLeadId || leadId || 'Order'}`;
+  const html = `
+    <p>Hi ${name || 'Customer'},</p>
+    <p>Your invoice for order <strong>${formattedLeadId || leadId || '–'}</strong> is ready.</p>
+    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Invoice PDF</a></p><p>Or copy: ${pdfUrl}</p>` : ''}
+    <p>You can also log in to your account to view and download.</p>
+    ${orderUrl !== 'your account' ? `<p><a href="${orderUrl}" style="color:#2563eb;">View my orders</a></p>` : ''}
+    <p>Thank you.</p>
+  `;
+  try {
+    await trans.sendMail({ from, to, subject, html });
+    console.log(`✅ Invoice-ready email (our SMTP) sent to ${to} for order ${leadId || '–'}${pdfUrl ? ' (PDF URL included)' : ''}`);
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to send invoice-ready email:', err.message);
     return false;
   }
 }

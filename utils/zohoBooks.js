@@ -263,51 +263,28 @@ class ZohoBooksService {
   }
 
   /**
-   * Parse delivery address string into structured address object for Zoho
-   * Splits by newlines or commas, extracts city/state/pincode if present
+   * Parse delivery address into structured address object for Zoho (billing/shipping).
+   * Uses full delivery address text so PDF shows complete address; uses order's city/state/pincode when present.
+   * @param {Object} order - Order with deliveryAddress, deliveryPincode, deliveryCity?, deliveryState?
    */
-  _parseDeliveryAddress(deliveryAddress, deliveryPincode) {
+  _parseDeliveryAddress(order) {
+    const deliveryAddress = order.deliveryAddress;
+    const deliveryPincode = order.deliveryPincode;
+    const deliveryCity = order.deliveryCity && String(order.deliveryCity).trim();
+    const deliveryState = order.deliveryState && String(order.deliveryState).trim();
+
     if (!deliveryAddress || deliveryAddress === 'Address to be updated') {
       return null;
     }
-    
-    // Split address by newlines or commas
-    const lines = deliveryAddress.split(/[\n,]+/).map(l => l.trim()).filter(l => l.length > 0);
-    
-    // Extract pincode from address if not provided separately
-    let pincode = deliveryPincode && deliveryPincode !== '000000' ? deliveryPincode : '';
-    if (!pincode && lines.length > 0) {
-      const lastLine = lines[lines.length - 1];
-      const pincodeMatch = lastLine.match(/\b\d{6}\b/);
-      if (pincodeMatch) {
-        pincode = pincodeMatch[0];
-        lines[lines.length - 1] = lastLine.replace(/\b\d{6}\b/, '').trim();
-      }
-    }
-    
-    // Try to extract city/state from last line (common format: "City, State" or "City State")
-    let city = '';
-    let state = '';
-    if (lines.length > 0) {
-      const lastLine = lines[lines.length - 1];
-      const cityStateMatch = lastLine.match(/^(.+?)(?:,\s*)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)?$/);
-      if (cityStateMatch && cityStateMatch[2]) {
-        city = cityStateMatch[1].trim();
-        state = cityStateMatch[2].trim();
-        lines.pop();
-      } else {
-        city = lastLine.trim();
-        lines.pop();
-      }
-    }
-    
-    // Join remaining lines as address
-    const address = lines.join(', ').substring(0, 500);
-    
+
+    // Use full delivery address as the main address line (no truncation to 2 lines)
+    const address = deliveryAddress.trim().substring(0, 500);
+    const pincode = deliveryPincode && deliveryPincode !== '000000' ? deliveryPincode : '';
+
     return {
       address: address || undefined,
-      city: city || undefined,
-      state: state || undefined,
+      city: deliveryCity || undefined,
+      state: deliveryState || undefined,
       zip: pincode || undefined,
       country: 'India'
     };
@@ -585,7 +562,7 @@ class ZohoBooksService {
       }
 
       // Parse delivery address for billing/shipping
-      const deliveryAddr = this._parseDeliveryAddress(order.deliveryAddress, order.deliveryPincode);
+      const deliveryAddr = this._parseDeliveryAddress(order);
       
       // Build Sales Order payload
       // DO NOT send salesorder_number - let Zoho auto-generate it
@@ -596,7 +573,8 @@ class ZohoBooksService {
         customer_id: zohoCustomerId,
         date: new Date().toISOString().split('T')[0],
         reference_number: order.leadId || '',
-        line_items: lineItems
+        line_items: lineItems,
+        is_inclusive_tax: true
       };
       
       // Add shipping charge if present
@@ -604,7 +582,7 @@ class ZohoBooksService {
         salesOrderData.shipping_charge = String(order.deliveryCharges.toFixed(2));
       }
       
-      // Add billing and shipping addresses
+      // Add billing and shipping addresses (full address from order)
       if (deliveryAddr) {
         salesOrderData.billing_address = deliveryAddr;
         salesOrderData.shipping_address = deliveryAddr;
@@ -808,13 +786,15 @@ class ZohoBooksService {
       }
 
       // Parse delivery address for billing/shipping
-      const deliveryAddr = this._parseDeliveryAddress(order.deliveryAddress, order.deliveryPincode);
+      const deliveryAddr = this._parseDeliveryAddress(order);
       
       // Don't provide invoice_number - let Zoho auto-generate it
+      // is_inclusive_tax: true so total matches our order total (no extra GST added)
       let invoiceData = {
         date: new Date().toISOString().split('T')[0],
         reference_number: order.leadId || '',
-        line_items: lineItems
+        line_items: lineItems,
+        is_inclusive_tax: true
       };
       if (zohoCustomerId) {
         invoiceData.customer_id = zohoCustomerId;
@@ -825,7 +805,7 @@ class ZohoBooksService {
         invoiceData.shipping_charge = String(order.deliveryCharges.toFixed(2));
       }
       
-      // Add billing and shipping addresses
+      // Add billing and shipping addresses (full address from order)
       if (deliveryAddr) {
         invoiceData.billing_address = deliveryAddr;
         invoiceData.shipping_address = deliveryAddr;
@@ -1471,15 +1451,17 @@ class ZohoBooksService {
       }
 
       // Parse delivery address for billing/shipping
-      const deliveryAddr = this._parseDeliveryAddress(order.deliveryAddress, order.deliveryPincode);
+      const deliveryAddr = this._parseDeliveryAddress(order);
       
       // Build Quote payload (Zoho Estimates API)
       // reference_number = our order ID (leadId) for sync between our system and Zoho
+      // is_inclusive_tax: true so Zoho does not add CGST/SGST on top – total matches our order total
       const quoteData = {
         customer_id: zohoCustomerId,
         date: new Date().toISOString().split('T')[0],
         reference_number: order.leadId || '',
-        line_items: lineItems
+        line_items: lineItems,
+        is_inclusive_tax: true
       };
       
       // Add shipping charge if present
@@ -1487,7 +1469,7 @@ class ZohoBooksService {
         quoteData.shipping_charge = String(order.deliveryCharges.toFixed(2));
       }
       
-      // Add billing and shipping addresses
+      // Add billing and shipping addresses (full address from order)
       if (deliveryAddr) {
         quoteData.billing_address = deliveryAddr;
         quoteData.shipping_address = deliveryAddr;
