@@ -281,6 +281,22 @@ class ZohoBooksService {
   }
 
   /**
+   * Stricter truncation for Sales Order create – Zoho returns "billing_address has less than 100 characters"
+   * when the combined or single field exceeds their limit. Use short limits so create never fails.
+   */
+  _truncateAddressForSalesOrderCreate(addr) {
+    if (!addr || typeof addr !== 'object') return addr;
+    const out = { ...addr, country: addr.country || 'India' };
+    const addressMax = 50;  // single line under 50 so total with city/state stays under 100
+    const cityStateMax = 30;
+    if (out.address && out.address.length > addressMax) out.address = out.address.substring(0, addressMax);
+    if (out.city && out.city.length > cityStateMax) out.city = out.city.substring(0, cityStateMax);
+    if (out.state && out.state.length > cityStateMax) out.state = out.state.substring(0, cityStateMax);
+    if (out.zip && out.zip.length > 20) out.zip = out.zip.substring(0, 20);
+    return out;
+  }
+
+  /**
    * Parse delivery address into structured address object for Zoho (billing/shipping).
    * Truncates to 99 chars for Zoho Sales Order API compatibility.
    * @param {Object} order - Order with deliveryAddress, deliveryPincode, deliveryCity?, deliveryState?
@@ -617,9 +633,9 @@ class ZohoBooksService {
         salesOrderData.shipping_charge = String(order.deliveryCharges.toFixed(2));
       }
       
-      // Add billing and shipping addresses (must be under 100 chars for Zoho Sales Order API)
+      // Add billing and shipping addresses – use strict truncation for create (Zoho rejects if over 100 chars)
       if (deliveryAddr) {
-        const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+        const safeAddr = this._truncateAddressForSalesOrderCreate(deliveryAddr);
         salesOrderData.billing_address = safeAddr;
         salesOrderData.shipping_address = safeAddr;
       }
@@ -670,9 +686,9 @@ class ZohoBooksService {
           // Don't fail - SO was created successfully
         }
 
-        // Set document-level billing/shipping so PDF shows order delivery address (not contact address)
+        // Set document-level billing/shipping (use same strict truncation as create)
         if (deliveryAddr) {
-          const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+          const safeAddr = this._truncateAddressForSalesOrderCreate(deliveryAddr);
           try {
             await this.makeRequest('PUT', `salesorders/${response.salesorder.salesorder_id}/address/billing`, safeAddr);
             await this.makeRequest('PUT', `salesorders/${response.salesorder.salesorder_id}/address/shipping`, safeAddr);
