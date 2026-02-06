@@ -828,9 +828,15 @@ export const placeOrder = async (req, res) => {
       });
     }
 
-    // Update delivery information
-    order.deliveryAddress = deliveryAddress;
-    order.deliveryPincode = deliveryPincode;
+    // Save ONLY the address from this request (place order API). This is what we use for Quote/SO/Invoice in Zoho – never contact/signup address.
+    const addressTrimmed = (deliveryAddress != null && String(deliveryAddress).trim()) ? String(deliveryAddress).trim() : '';
+    if (!addressTrimmed) {
+      return res.status(400).json({
+        message: 'Delivery address is required when placing order'
+      });
+    }
+    order.deliveryAddress = addressTrimmed;
+    order.deliveryPincode = deliveryPincode != null ? String(deliveryPincode).trim() : order.deliveryPincode;
     if (deliveryCity != null && String(deliveryCity).trim()) order.deliveryCity = String(deliveryCity).trim();
     if (deliveryState != null && String(deliveryState).trim()) order.deliveryState = String(deliveryState).trim();
     order.deliveryExpectedDate = deliveryExpectedDate;

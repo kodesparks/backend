@@ -262,12 +262,27 @@ class ZohoBooksService {
     }
   }
 
-  /** Zoho Books limit: billing_address "address" field must be under 100 characters (Sales Order API). */
-  static get ZOHO_ADDRESS_MAX_LEN() { return 100; }
+  /** Zoho Books Sales Order API: billing_address "address" field must be under 100 characters. */
+  static get ZOHO_ADDRESS_MAX_LEN() { return 99; }
+
+  /**
+   * Enforce Zoho's 100-char limit (Sales Order API rejects "billing_address has less than 100 characters").
+   * Zoho may count the main "address" field only: we cap it at 99. Also cap city/state/zip.
+   */
+  _truncateAddressForZoho(addr) {
+    if (!addr || typeof addr !== 'object') return addr;
+    const addrMax = 99;
+    const out = { ...addr, country: addr.country || 'India' };
+    if (out.address && out.address.length > addrMax) out.address = out.address.substring(0, addrMax);
+    if (out.city && out.city.length > addrMax) out.city = out.city.substring(0, addrMax);
+    if (out.state && out.state.length > addrMax) out.state = out.state.substring(0, addrMax);
+    if (out.zip && out.zip.length > 20) out.zip = out.zip.substring(0, 20);
+    return out;
+  }
 
   /**
    * Parse delivery address into structured address object for Zoho (billing/shipping).
-   * Truncates address line to 100 chars for Zoho Sales Order API compatibility.
+   * Truncates to 99 chars for Zoho Sales Order API compatibility.
    * @param {Object} order - Order with deliveryAddress, deliveryPincode, deliveryCity?, deliveryState?
    */
   _parseDeliveryAddress(order) {
@@ -280,7 +295,7 @@ class ZohoBooksService {
       return null;
     }
 
-    const maxLen = this.constructor.ZOHO_ADDRESS_MAX_LEN || 100;
+    const maxLen = 99;
     const address = deliveryAddress.trim().substring(0, maxLen);
     const pincode = deliveryPincode && deliveryPincode !== '000000' ? deliveryPincode : '';
 
@@ -294,25 +309,16 @@ class ZohoBooksService {
   }
 
   /**
-   * Get billing/shipping address for Zoho: prefer order's delivery address; if missing or placeholder, use customer's profile address.
-   * Ensures quote/SO/invoice PDFs show a real address instead of random or stale contact data.
+   * Get billing/shipping address for Zoho from order only (no customer fallback).
+   * Per Zoho Books API: billing_address is object { address, street2?, city?, state?, zip?, country?, fax?, attention? }.
+   * We do NOT fall back to customer profile address, to avoid showing placeholder/garbage (e.g. "asdf something") on the PDF.
    * @param {Object} order - Order with deliveryAddress, deliveryPincode, deliveryCity?, deliveryState?
-   * @param {Object} [customer] - User with address, pincode (optional fallback)
    * @returns {Object|null} Zoho-style address { address, city?, state?, zip, country } or null
    */
-  _getBillingAddressForZoho(order, customer) {
+  _getBillingAddressForZoho(order) {
     const fromOrder = this._parseDeliveryAddress(order);
-    if (fromOrder && fromOrder.address) return fromOrder;
-    if (!customer) return null;
-    const maxLen = this.constructor.ZOHO_ADDRESS_MAX_LEN || 100;
-    const addr = (customer.address && String(customer.address).trim()) ? String(customer.address).trim().substring(0, maxLen) : '';
-    const zip = (customer.pincode && String(customer.pincode).trim()) ? String(customer.pincode).trim().substring(0, 50) : '';
-    if (!addr && !zip) return null;
-    return {
-      address: addr || undefined,
-      zip: zip || undefined,
-      country: 'India'
-    };
+    if (!fromOrder || !fromOrder.address) return null;
+    return this._truncateAddressForZoho(fromOrder);
   }
 
   /**
@@ -587,7 +593,11 @@ class ZohoBooksService {
       }
 
       // Billing/shipping: prefer order delivery address, fallback to customer profile
-      const deliveryAddr = this._getBillingAddressForZoho(order, customer);
+      // Billing/shipping: ONLY from order (place order API). Never use Zoho contact/signup address.
+      const deliveryAddr = this._getBillingAddressForZoho(order);
+      if (!deliveryAddr) {
+        console.warn(`⚠️  Sales Order will use Zoho contact address: order has no valid delivery address. Ensure place order API was called with deliveryAddress.`);
+      }
 
       // Build Sales Order payload
       // DO NOT send salesorder_number - let Zoho auto-generate it
@@ -607,10 +617,11 @@ class ZohoBooksService {
         salesOrderData.shipping_charge = String(order.deliveryCharges.toFixed(2));
       }
       
-      // Add billing and shipping addresses (full address from order)
+      // Add billing and shipping addresses (must be under 100 chars for Zoho Sales Order API)
       if (deliveryAddr) {
-        salesOrderData.billing_address = deliveryAddr;
-        salesOrderData.shipping_address = deliveryAddr;
+        const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+        salesOrderData.billing_address = safeAddr;
+        salesOrderData.shipping_address = safeAddr;
       }
       
       console.log('📤 Creating Sales Order in Zoho:', JSON.stringify(salesOrderData, null, 2));
@@ -657,6 +668,18 @@ class ZohoBooksService {
         } catch (updateError) {
           console.warn(`⚠️  Failed to update Sales Order with custom fields:`, updateError.message);
           // Don't fail - SO was created successfully
+        }
+
+        // Set document-level billing/shipping so PDF shows order delivery address (not contact address)
+        if (deliveryAddr) {
+          const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+          try {
+            await this.makeRequest('PUT', `salesorders/${response.salesorder.salesorder_id}/address/billing`, safeAddr);
+            await this.makeRequest('PUT', `salesorders/${response.salesorder.salesorder_id}/address/shipping`, safeAddr);
+            console.log(`✅ Sales Order billing/shipping address set on document`);
+          } catch (addrError) {
+            console.warn(`⚠️  Failed to set Sales Order billing/shipping address:`, addrError.message);
+          }
         }
       }
       
@@ -804,7 +827,11 @@ class ZohoBooksService {
       }
 
       // Billing/shipping: prefer order delivery address, fallback to customer profile
-      const deliveryAddr = this._getBillingAddressForZoho(order, customer);
+      // Billing/shipping: ONLY from order (place order API). Never use Zoho contact/signup address.
+      const deliveryAddr = this._getBillingAddressForZoho(order);
+      if (!deliveryAddr) {
+        console.warn(`⚠️  Invoice will use Zoho contact address: order has no valid delivery address. Ensure place order API was called with deliveryAddress.`);
+      }
 
       // Don't provide invoice_number - let Zoho auto-generate it
       // is_inclusive_tax: true so total matches our order total (no extra GST added)
@@ -825,8 +852,9 @@ class ZohoBooksService {
       
       // Add billing and shipping addresses (full address from order)
       if (deliveryAddr) {
-        invoiceData.billing_address = deliveryAddr;
-        invoiceData.shipping_address = deliveryAddr;
+        const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+        invoiceData.billing_address = safeAddr;
+        invoiceData.shipping_address = safeAddr;
       }
 
       // Custom fields are added via update after creation
@@ -854,6 +882,18 @@ class ZohoBooksService {
         } catch (updateError) {
           console.warn(`⚠️  Failed to update Invoice with custom fields:`, updateError.message);
           // Don't fail - invoice was created successfully
+        }
+
+        // Set document-level billing/shipping so PDF shows order delivery address (not contact address)
+        if (deliveryAddr) {
+          const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+          try {
+            await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}/address/billing`, safeAddr);
+            await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}/address/shipping`, safeAddr);
+            console.log(`✅ Invoice billing/shipping address set on document`);
+          } catch (addrError) {
+            console.warn(`⚠️  Failed to set Invoice billing/shipping address:`, addrError.message);
+          }
         }
       }
       
@@ -1468,8 +1508,11 @@ class ZohoBooksService {
         }
       }
 
-      // Billing/shipping: prefer order delivery address, fallback to customer profile (avoids random/stale data on PDF)
-      const deliveryAddr = this._getBillingAddressForZoho(order, customer);
+      // Billing/shipping: ONLY from order (place order API). Never use Zoho contact/signup address.
+      const deliveryAddr = this._getBillingAddressForZoho(order);
+      if (!deliveryAddr) {
+        console.warn(`⚠️  Quote will use Zoho contact address: order has no valid delivery address (order.deliveryAddress missing or "Address to be updated"). Ensure place order API was called with deliveryAddress.`);
+      }
 
       // Build Quote payload (Zoho Estimates API)
       // reference_number = our order ID (leadId) for sync between our system and Zoho
@@ -1489,8 +1532,9 @@ class ZohoBooksService {
       
       // Add billing and shipping addresses (full address from order)
       if (deliveryAddr) {
-        quoteData.billing_address = deliveryAddr;
-        quoteData.shipping_address = deliveryAddr;
+        const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+        quoteData.billing_address = safeAddr;
+        quoteData.shipping_address = safeAddr;
       }
 
       // IMPORTANT: Estimates API expects data WITHOUT { estimate: {...} } wrapper
@@ -1516,6 +1560,19 @@ class ZohoBooksService {
         } catch (updateError) {
           console.warn(`⚠️  Failed to update Quote with custom fields:`, updateError.message);
           // Don't fail - quote was created successfully
+        }
+
+        // Zoho often uses contact address for the PDF when create payload is ignored. Set document-level
+        // billing and shipping address so the quote PDF shows the order delivery address.
+        if (deliveryAddr) {
+          const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+          try {
+            await this.makeRequest('PUT', `estimates/${response.estimate.estimate_id}/address/billing`, safeAddr);
+            await this.makeRequest('PUT', `estimates/${response.estimate.estimate_id}/address/shipping`, safeAddr);
+            console.log(`✅ Quote billing/shipping address set on document (order delivery address)`);
+          } catch (addrError) {
+            console.warn(`⚠️  Failed to set quote billing/shipping address on document:`, addrError.message);
+          }
         }
       }
       
