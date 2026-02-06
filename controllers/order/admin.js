@@ -6,6 +6,7 @@ import User from '../../models/User.js';
 import mongoose from 'mongoose';
 import zohoBooksService from '../../utils/zohoBooks.js';
 import { sendOrderAcceptedEmail, sendQuoteReadyEmail, sendSalesOrderReadyEmail, sendInvoiceReadyEmail } from '../../utils/emailService.js';
+import { getPublicQuotePdfUrl } from './customer.js';
 
 // Get all orders (Admin)
 export const getAllOrders = async (req, res) => {
@@ -778,9 +779,9 @@ export const updateOrderStatus = async (req, res) => {
             await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch((err) => {
               console.warn(`⚠️ Quote email (Zoho) failed for order ${order.leadId}:`, err?.message || err);
             });
-            // Always send our SMTP email with public PDF URL
+            // Always send our SMTP email with public PDF URL (our link works without Zoho login)
             if (customer.email) {
-              const pdfUrl = await zohoBooksService.getQuotePDFUrl(zohoQuote.estimate_id).catch(() => null);
+              const pdfUrl = getPublicQuotePdfUrl(order.leadId);
               await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
@@ -1209,7 +1210,7 @@ export const downloadQuotePDF = async (req, res) => {
             }
             await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => false);
             if (customer.email) {
-              const pdfUrl = await zohoBooksService.getQuotePDFUrl(zohoQuote.estimate_id).catch(() => null);
+              const pdfUrl = getPublicQuotePdfUrl(order.leadId);
               await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Quote created on-demand for order ${order.leadId} (admin PDF request)`);

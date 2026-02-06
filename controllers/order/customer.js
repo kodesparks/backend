@@ -11,6 +11,7 @@ import WarehouseService from '../../services/warehouseService.js';
 import zohoBooksService from '../../utils/zohoBooks.js';
 import { sendOrderPlacedEmail, sendQuoteReadyEmail, sendSalesOrderReadyEmail, sendInvoiceReadyEmail } from '../../utils/emailService.js';
 import User from '../../models/User.js';
+import { generateQuotePdfToken, verifyQuotePdfToken } from '../../utils/jwt.js';
 
 // Add item to cart (Create order)
 export const addToCart = async (req, res) => {
@@ -551,7 +552,7 @@ export const downloadQuotePDF = async (req, res) => {
             }
             await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => false);
             if (customer.email) {
-              const pdfUrl = await zohoBooksService.getQuotePDFUrl(zohoQuote.estimate_id).catch(() => null);
+              const pdfUrl = getPublicQuotePdfUrl(order.leadId);
               await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Quote created on-demand for order ${order.leadId} (customer PDF request)`);
@@ -585,6 +586,49 @@ export const downloadQuotePDF = async (req, res) => {
     });
   }
 };
+
+/**
+ * Public quote PDF (no login). Used by the link in quote-ready email.
+ * GET /api/order/quote-pdf?token=<jwt>
+ * Token is generated with generateQuotePdfToken(leadId) and valid 30 days.
+ */
+export const getPublicQuotePDF = async (req, res) => {
+  try {
+    const token = req.query.token;
+    if (!token) {
+      return res.status(400).json({ message: 'Missing token' });
+    }
+    const payload = verifyQuotePdfToken(token);
+    if (!payload?.leadId) {
+      return res.status(403).json({ message: 'Invalid or expired link' });
+    }
+    const order = await Order.findOne({
+      leadId: payload.leadId,
+      isActive: true,
+      zohoQuoteId: { $exists: true, $ne: null }
+    });
+    if (!order?.zohoQuoteId) {
+      return res.status(404).json({ message: 'Quote not found or not ready yet' });
+    }
+    const pdfBuffer = await zohoBooksService.getQuotePDF(order.zohoQuoteId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Quote-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Public Quote PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to load Quote PDF',
+      error: error.message
+    });
+  }
+};
+
+/** Build public quote PDF URL for email (no Zoho login required). */
+export function getPublicQuotePdfUrl(leadId) {
+  const base = (process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
+  const token = generateQuotePdfToken(leadId);
+  return token ? `${base}/api/order/quote-pdf?token=${token}` : null;
+}
 
 // Download Purchase Order PDF (only when vendor assigned and PO created in Zoho)
 export const downloadPurchaseOrderPDF = async (req, res) => {
@@ -1030,7 +1074,7 @@ export const processPayment = async (req, res) => {
                 }
                 await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
                 if (customer.email) {
-                  const pdfUrl = await zohoBooksService.getQuotePDFUrl(zohoQuote.estimate_id).catch(() => null);
+                  const pdfUrl = getPublicQuotePdfUrl(order.leadId);
                   await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
                 }
               }

@@ -17,6 +17,7 @@ import {
   changeDeliveryDate,
   getOrderChangeHistory,
   downloadQuotePDF,
+  getPublicQuotePDF,
   downloadPurchaseOrderPDF,
   downloadSalesOrderPDF,
   downloadInvoicePDF
@@ -193,6 +194,9 @@ const leadIdValidation = [
 ];
 
 // ==================== CUSTOMER ROUTES ====================
+
+// Public quote PDF (no auth) – link in quote-ready email
+router.get('/quote-pdf', getPublicQuotePDF);
 
 // Add item to cart (Create order)
 router.post('/cart/add', 

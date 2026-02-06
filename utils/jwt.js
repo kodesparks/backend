@@ -66,3 +66,22 @@ export const generateTokens = (user) => {
   const refreshToken = generateRefreshToken(user);
   return { accessToken, refreshToken };
 };
+
+/** Token for public quote PDF link (email). No login required; valid 30 days. */
+export const generateQuotePdfToken = (leadId) => {
+  if (!ACCESS_TOKEN_SECRET) return null;
+  return jwt.sign(
+    { leadId: String(leadId), purpose: 'quote-pdf' },
+    ACCESS_TOKEN_SECRET,
+    { expiresIn: '30d' }
+  );
+};
+
+export const verifyQuotePdfToken = (token) => {
+  try {
+    const payload = jwt.verify(token, ACCESS_TOKEN_SECRET);
+    return payload?.purpose === 'quote-pdf' && payload?.leadId ? payload : null;
+  } catch {
+    return null;
+  }
+};
