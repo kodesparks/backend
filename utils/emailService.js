@@ -180,9 +180,10 @@ export async function sendOrderAcceptedEmail(to, name, orderDetails) {
  * @param {string} name - Customer name
  * @param {string} leadId - Order/lead ID (e.g. CT-084)
  * @param {string} formattedLeadId - Formatted order ID for display
+ * @param {string} pdfUrl - Optional public PDF URL from Zoho
  * @returns {Promise<boolean>}
  */
-export async function sendQuoteReadyEmail(to, name, leadId, formattedLeadId) {
+export async function sendQuoteReadyEmail(to, name, leadId, formattedLeadId, pdfUrl = null) {
   const trans = getTransporter();
   if (!trans || !to || !String(to).trim()) {
     return false;
@@ -194,13 +195,14 @@ export async function sendQuoteReadyEmail(to, name, leadId, formattedLeadId) {
   const html = `
     <p>Hi ${name || 'Customer'},</p>
     <p>Your quote for order <strong>${formattedLeadId || leadId || '–'}</strong> is ready.</p>
+    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Quote PDF</a></p>` : ''}
     <p>Please log in to your account to view and download the quote.</p>
     ${orderUrl !== 'your account' ? `<p><a href="${orderUrl}" style="color:#2563eb;">View my orders</a></p>` : ''}
     <p>Thank you.</p>
   `;
   try {
     await trans.sendMail({ from, to, subject, html });
-    console.log(`✅ Quote-ready email (fallback) sent to ${to} for order ${leadId || '–'}`);
+    console.log(`✅ Quote-ready email (fallback) sent to ${to} for order ${leadId || '–'}${pdfUrl ? ` (PDF URL included)` : ''}`);
     return true;
   } catch (err) {
     console.error('❌ Failed to send quote-ready email:', err.message);

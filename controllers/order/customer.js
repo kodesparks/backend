@@ -551,7 +551,8 @@ export const downloadQuotePDF = async (req, res) => {
             }
             const emailSent = await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => false);
             if (!emailSent && customer.email) {
-              await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId || order.leadId).catch(() => {});
+              const pdfUrl = emailSent?.pdfUrl || await zohoBooksService.getQuotePDFUrl(zohoQuote.estimate_id).catch(() => null);
+              await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Quote created on-demand for order ${order.leadId} (customer PDF request)`);
           }

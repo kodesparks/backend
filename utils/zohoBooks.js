@@ -263,6 +263,57 @@ class ZohoBooksService {
   }
 
   /**
+   * Parse delivery address string into structured address object for Zoho
+   * Splits by newlines or commas, extracts city/state/pincode if present
+   */
+  _parseDeliveryAddress(deliveryAddress, deliveryPincode) {
+    if (!deliveryAddress || deliveryAddress === 'Address to be updated') {
+      return null;
+    }
+    
+    // Split address by newlines or commas
+    const lines = deliveryAddress.split(/[\n,]+/).map(l => l.trim()).filter(l => l.length > 0);
+    
+    // Extract pincode from address if not provided separately
+    let pincode = deliveryPincode && deliveryPincode !== '000000' ? deliveryPincode : '';
+    if (!pincode && lines.length > 0) {
+      const lastLine = lines[lines.length - 1];
+      const pincodeMatch = lastLine.match(/\b\d{6}\b/);
+      if (pincodeMatch) {
+        pincode = pincodeMatch[0];
+        lines[lines.length - 1] = lastLine.replace(/\b\d{6}\b/, '').trim();
+      }
+    }
+    
+    // Try to extract city/state from last line (common format: "City, State" or "City State")
+    let city = '';
+    let state = '';
+    if (lines.length > 0) {
+      const lastLine = lines[lines.length - 1];
+      const cityStateMatch = lastLine.match(/^(.+?)(?:,\s*)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)?$/);
+      if (cityStateMatch && cityStateMatch[2]) {
+        city = cityStateMatch[1].trim();
+        state = cityStateMatch[2].trim();
+        lines.pop();
+      } else {
+        city = lastLine.trim();
+        lines.pop();
+      }
+    }
+    
+    // Join remaining lines as address
+    const address = lines.join(', ').substring(0, 500);
+    
+    return {
+      address: address || undefined,
+      city: city || undefined,
+      state: state || undefined,
+      zip: pincode || undefined,
+      country: 'India'
+    };
+  }
+
+  /**
    * Sanitize name for Zoho: alphanumeric and spaces only, max length.
    */
   _sanitizeItemName(raw, maxLen = 100) {
@@ -533,6 +584,9 @@ class ZohoBooksService {
         }
       }
 
+      // Parse delivery address for billing/shipping
+      const deliveryAddr = this._parseDeliveryAddress(order.deliveryAddress, order.deliveryPincode);
+      
       // Build Sales Order payload
       // DO NOT send salesorder_number - let Zoho auto-generate it
       // Build Sales Order payload (Zoho Sales Order API)
@@ -544,6 +598,17 @@ class ZohoBooksService {
         reference_number: order.leadId || '',
         line_items: lineItems
       };
+      
+      // Add shipping charge if present
+      if (order.deliveryCharges && order.deliveryCharges > 0) {
+        salesOrderData.shipping_charge = String(order.deliveryCharges.toFixed(2));
+      }
+      
+      // Add billing and shipping addresses
+      if (deliveryAddr) {
+        salesOrderData.billing_address = deliveryAddr;
+        salesOrderData.shipping_address = deliveryAddr;
+      }
       
       console.log('📤 Creating Sales Order in Zoho:', JSON.stringify(salesOrderData, null, 2));
       const response = await this.makeRequest('POST', 'salesorders', salesOrderData);
@@ -604,21 +669,31 @@ class ZohoBooksService {
    * Email an estimate (quote) to the customer via Zoho Books.
    * POST /estimates/{estimate_id}/email
    * Sends to contact persons associated with the estimate. Optional body: { to_mail_ids, subject, body }.
-   * SMS: Zoho Books has no public API to send SMS for estimates; use in-app SMS settings or a separate SMS provider.
+   * Includes public PDF URL in email body.
    */
   async emailEstimate(estimateId, options = {}) {
     if (!estimateId) return null;
     try {
+      // Get public PDF URL
+      const pdfUrl = await this.getQuotePDFUrl(estimateId);
+      
       const body = {};
       if (options.to_mail_ids) body.to_mail_ids = options.to_mail_ids;
       if (options.subject) body.subject = options.subject;
-      if (options.body) body.body = options.body;
+      
+      // Include PDF URL in email body
+      let emailBody = options.body || '';
+      if (pdfUrl) {
+        emailBody += (emailBody ? '\n\n' : '') + `View Quote PDF: ${pdfUrl}`;
+      }
+      if (emailBody) body.body = emailBody;
+      
       const response = await this.makeRequest('POST', `estimates/${estimateId}/email`, Object.keys(body).length ? body : {});
       if (response?.code === 0) {
-        console.log(`✅ Zoho Books: Estimate ${estimateId} emailed successfully`);
-        return response;
+        console.log(`✅ Zoho Books: Estimate ${estimateId} emailed successfully${pdfUrl ? ` (PDF URL: ${pdfUrl})` : ''}`);
+        return { ...response, pdfUrl };
       }
-      return response;
+      return { ...response, pdfUrl };
     } catch (error) {
       console.warn(`⚠️  Zoho Books email estimate failed:`, error.response?.data || error.message);
       return null;
@@ -628,21 +703,31 @@ class ZohoBooksService {
   /**
    * Email a sales order to the customer via Zoho Books.
    * POST /salesorders/{salesorder_id}/email
-   * SMS: Zoho Books has no public API to send SMS for sales orders; use in-app SMS or a separate provider.
+   * Includes public PDF URL in email body.
    */
   async emailSalesOrder(salesOrderId, options = {}) {
     if (!salesOrderId) return null;
     try {
+      // Get public PDF URL
+      const pdfUrl = await this.getSalesOrderPDFUrl(salesOrderId);
+      
       const body = {};
       if (options.to_mail_ids) body.to_mail_ids = options.to_mail_ids;
       if (options.subject) body.subject = options.subject;
-      if (options.body) body.body = options.body;
+      
+      // Include PDF URL in email body
+      let emailBody = options.body || '';
+      if (pdfUrl) {
+        emailBody += (emailBody ? '\n\n' : '') + `View Sales Order PDF: ${pdfUrl}`;
+      }
+      if (emailBody) body.body = emailBody;
+      
       const response = await this.makeRequest('POST', `salesorders/${salesOrderId}/email`, Object.keys(body).length ? body : {});
       if (response?.code === 0) {
-        console.log(`✅ Zoho Books: Sales Order ${salesOrderId} emailed successfully`);
-        return response;
+        console.log(`✅ Zoho Books: Sales Order ${salesOrderId} emailed successfully${pdfUrl ? ` (PDF URL: ${pdfUrl})` : ''}`);
+        return { ...response, pdfUrl };
       }
-      return response;
+      return { ...response, pdfUrl };
     } catch (error) {
       console.warn(`⚠️  Zoho Books email sales order failed:`, error.response?.data || error.message);
       return null;
@@ -653,20 +738,31 @@ class ZohoBooksService {
    * Email an invoice to the customer via Zoho Books.
    * POST /invoices/{invoice_id}/email
    * Sends to contact persons associated with the invoice. Optional body: { to_mail_ids, subject, body }.
+   * Includes public PDF URL in email body.
    */
   async emailInvoice(invoiceId, options = {}) {
     if (!invoiceId) return null;
     try {
+      // Get public PDF URL
+      const pdfUrl = await this.getInvoicePDFUrl(invoiceId);
+      
       const body = {};
       if (options.to_mail_ids) body.to_mail_ids = options.to_mail_ids;
       if (options.subject) body.subject = options.subject;
-      if (options.body) body.body = options.body;
+      
+      // Include PDF URL in email body
+      let emailBody = options.body || '';
+      if (pdfUrl) {
+        emailBody += (emailBody ? '\n\n' : '') + `View Invoice PDF: ${pdfUrl}`;
+      }
+      if (emailBody) body.body = emailBody;
+      
       const response = await this.makeRequest('POST', `invoices/${invoiceId}/email`, Object.keys(body).length ? body : {});
       if (response?.code === 0) {
-        console.log(`✅ Zoho Books: Invoice ${invoiceId} emailed successfully`);
-        return response;
+        console.log(`✅ Zoho Books: Invoice ${invoiceId} emailed successfully${pdfUrl ? ` (PDF URL: ${pdfUrl})` : ''}`);
+        return { ...response, pdfUrl };
       }
-      return response;
+      return { ...response, pdfUrl };
     } catch (error) {
       console.warn(`⚠️  Zoho Books email invoice failed:`, error.response?.data || error.message);
       return null;
@@ -711,6 +807,9 @@ class ZohoBooksService {
         }
       }
 
+      // Parse delivery address for billing/shipping
+      const deliveryAddr = this._parseDeliveryAddress(order.deliveryAddress, order.deliveryPincode);
+      
       // Don't provide invoice_number - let Zoho auto-generate it
       let invoiceData = {
         date: new Date().toISOString().split('T')[0],
@@ -719,6 +818,17 @@ class ZohoBooksService {
       };
       if (zohoCustomerId) {
         invoiceData.customer_id = zohoCustomerId;
+      }
+      
+      // Add shipping charge if present
+      if (order.deliveryCharges && order.deliveryCharges > 0) {
+        invoiceData.shipping_charge = String(order.deliveryCharges.toFixed(2));
+      }
+      
+      // Add billing and shipping addresses
+      if (deliveryAddr) {
+        invoiceData.billing_address = deliveryAddr;
+        invoiceData.shipping_address = deliveryAddr;
       }
 
       // Custom fields are added via update after creation
@@ -1302,6 +1412,23 @@ class ZohoBooksService {
   }
 
   /**
+   * Get public PDF URL for Invoice
+   */
+  async getInvoicePDFUrl(invoiceId) {
+    try {
+      const response = await this.makeRequest('GET', `invoices/${invoiceId}`);
+      if (response.invoice?.pdf_url) {
+        return response.invoice.pdf_url;
+      }
+      const baseDomain = this.baseURL.includes('zohoapis.in') ? 'books.zoho.in' : 'books.zoho.com';
+      return `https://${baseDomain}/app#/books/invoice/${invoiceId}/pdf`;
+    } catch (error) {
+      console.error(`❌ Failed to get Invoice PDF URL:`, error.response?.data || error.message);
+      return null;
+    }
+  }
+
+  /**
    * Create Quote in Zoho Books
    * Called when: Admin creates quotation for customer order
    * Step 2: Order review → Create quotation → Send SMS/email with payment link
@@ -1343,6 +1470,9 @@ class ZohoBooksService {
         }
       }
 
+      // Parse delivery address for billing/shipping
+      const deliveryAddr = this._parseDeliveryAddress(order.deliveryAddress, order.deliveryPincode);
+      
       // Build Quote payload (Zoho Estimates API)
       // reference_number = our order ID (leadId) for sync between our system and Zoho
       const quoteData = {
@@ -1351,6 +1481,17 @@ class ZohoBooksService {
         reference_number: order.leadId || '',
         line_items: lineItems
       };
+      
+      // Add shipping charge if present
+      if (order.deliveryCharges && order.deliveryCharges > 0) {
+        quoteData.shipping_charge = String(order.deliveryCharges.toFixed(2));
+      }
+      
+      // Add billing and shipping addresses
+      if (deliveryAddr) {
+        quoteData.billing_address = deliveryAddr;
+        quoteData.shipping_address = deliveryAddr;
+      }
 
       // IMPORTANT: Estimates API expects data WITHOUT { estimate: {...} } wrapper
       console.log('📤 Creating Quote in Zoho:', JSON.stringify(quoteData, null, 2));
@@ -1440,6 +1581,26 @@ class ZohoBooksService {
   }
 
   /**
+   * Get public PDF URL for Quote
+   * Zoho Books provides public PDF URLs in the estimate response
+   */
+  async getQuotePDFUrl(estimateId) {
+    try {
+      const response = await this.makeRequest('GET', `estimates/${estimateId}`);
+      // Zoho Books response may include pdf_url or we construct it
+      if (response.estimate?.pdf_url) {
+        return response.estimate.pdf_url;
+      }
+      // Fallback: construct public URL (format may vary by region)
+      const baseDomain = this.baseURL.includes('zohoapis.in') ? 'books.zoho.in' : 'books.zoho.com';
+      return `https://${baseDomain}/app#/books/estimate/${estimateId}/pdf`;
+    } catch (error) {
+      console.error(`❌ Failed to get Quote PDF URL:`, error.response?.data || error.message);
+      return null;
+    }
+  }
+
+  /**
    * Get Payment Receipt PDF
    */
   async getPaymentReceiptPDF(paymentId) {
@@ -1484,6 +1645,23 @@ class ZohoBooksService {
     } catch (error) {
       console.error(`❌ Failed to get Sales Order PDF:`, error.response?.data || error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Get public PDF URL for Sales Order
+   */
+  async getSalesOrderPDFUrl(salesOrderId) {
+    try {
+      const response = await this.makeRequest('GET', `salesorders/${salesOrderId}`);
+      if (response.salesorder?.pdf_url) {
+        return response.salesorder.pdf_url;
+      }
+      const baseDomain = this.baseURL.includes('zohoapis.in') ? 'books.zoho.in' : 'books.zoho.com';
+      return `https://${baseDomain}/app#/books/salesorder/${salesOrderId}/pdf`;
+    } catch (error) {
+      console.error(`❌ Failed to get Sales Order PDF URL:`, error.response?.data || error.message);
+      return null;
     }
   }
 
