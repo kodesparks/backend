@@ -880,12 +880,8 @@ class ZohoBooksService {
         invoiceData.shipping_charge = String(order.deliveryCharges.toFixed(2));
       }
       
-      // Add billing and shipping addresses (full address from order)
-      if (deliveryAddr) {
-        const safeAddr = this._truncateAddressForZoho(deliveryAddr);
-        invoiceData.billing_address = safeAddr;
-        invoiceData.shipping_address = safeAddr;
-      }
+      // Do NOT send billing_address/shipping_address on create – Zoho returns same error as Sales Order:
+      // "billing_address has less than 100 characters". Create first, then set addresses via PUT.
 
       // Custom fields are added via update after creation
       // IMPORTANT: Invoices API expects data WITHOUT { invoice: {...} } wrapper (like Estimates and Sales Orders)
@@ -914,9 +910,9 @@ class ZohoBooksService {
           // Don't fail - invoice was created successfully
         }
 
-        // Set document-level billing/shipping so PDF shows order delivery address (not contact address)
+        // Set document-level billing/shipping so PDF shows order delivery address (strict truncation for Zoho 100-char limit)
         if (deliveryAddr) {
-          const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+          const safeAddr = this._truncateAddressForSalesOrderCreate(deliveryAddr);
           try {
             await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}/address/billing`, safeAddr);
             await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}/address/shipping`, safeAddr);
