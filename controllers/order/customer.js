@@ -1086,12 +1086,38 @@ export const processPayment = async (req, res) => {
           'Payment processed successfully'
         );
 
-        // When payment_done: create Sales Order (Zoho SO) and email it
+        // When payment_done: ensure Quote exists and was emailed, then create Sales Order (Zoho SO) and email it
         const currentOrder = await Order.findById(order._id);
         if (currentOrder && !currentOrder.zohoSalesOrderId) {
           try {
             const vendor = currentOrder.vendorId ? await User.findById(currentOrder.vendorId) : null;
             const customer = await User.findById(currentOrder.custUserId);
+            let orderForQuote = await Order.findById(order._id);
+
+            // If no Quote yet, create it and send quote-ready email first
+            if (!orderForQuote.zohoQuoteId && customer) {
+              try {
+                const populatedForQuote = await Order.findById(order._id)
+                  .populate('items.itemCode', 'itemDescription category subCategory units pricing zohoItemId');
+                const zohoQuote = await zohoBooksService.createQuote(populatedForQuote, customer);
+                if (zohoQuote?.estimate_id) {
+                  await Order.updateOne({ _id: order._id }, { $set: { zohoQuoteId: zohoQuote.estimate_id } });
+                  orderForQuote = await Order.findById(order._id);
+                  if (customer.zohoCustomerId) {
+                    await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, orderForQuote, customer).catch(() => {});
+                  }
+                  await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
+                  const notifQuote = getOrderNotificationContact(orderForQuote, customer);
+                  if (notifQuote.email) {
+                    const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+                    await sendQuoteReadyEmail(notifQuote.email, notifQuote.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+                  }
+                }
+              } catch (quoteErr) {
+                console.warn(`⚠️ Quote creation before SO failed for ${order.leadId}:`, quoteErr?.message || quoteErr);
+              }
+            }
+
             const populatedOrder = await Order.findById(order._id)
               .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
             const zohoSO = await zohoBooksService.createSalesOrder(populatedOrder, vendor, customer);
