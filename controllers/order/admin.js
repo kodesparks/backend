@@ -774,17 +774,41 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    // When order is ACCEPTED (vendor_accepted): send email only – no quote yet
+    // When order is ACCEPTED (vendor_accepted): create Quote in Zoho, send quote email to order email, then order-accepted email
     if (orderStatus === 'vendor_accepted') {
       (async () => {
         try {
-          const customer = await User.findById(order.custUserId).select('email name').lean();
+          const customer = await User.findById(order.custUserId);
           if (customer?.email) {
             await sendOrderAcceptedEmail(
-              customer.email,
-              customer.name || 'Customer',
+              getOrderNotificationContact(order, customer).email || customer.email,
+              getOrderNotificationContact(order, customer).name || customer.name || 'Customer',
               { leadId: order.leadId, formattedLeadId: order.formattedLeadId }
             ).catch(() => {});
+          }
+          // Create Quote in Zoho as soon as order is accepted – then send quote email (so customer gets it without downloading PDF)
+          if (!order.zohoQuoteId && customer) {
+            try {
+              const populatedOrder = await Order.findById(order._id)
+                .populate('items.itemCode', 'itemDescription category subCategory units pricing zohoItemId');
+              const zohoQuote = await zohoBooksService.createQuote(populatedOrder, customer);
+              if (zohoQuote?.estimate_id) {
+                await Order.updateOne({ _id: order._id }, { $set: { zohoQuoteId: zohoQuote.estimate_id } });
+                console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId} (at vendor_accepted)`);
+                if (customer.zohoCustomerId) {
+                  await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
+                }
+                await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
+                const notif = getOrderNotificationContact(order, customer);
+                if (notif.email) {
+                  const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+                  await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+                  console.log(`✅ Quote-ready email (with PDF) sent to order email for ${order.leadId}`);
+                }
+              }
+            } catch (quoteErr) {
+              console.warn(`⚠️ Quote creation at vendor_accepted failed for ${order.leadId}:`, quoteErr?.message || quoteErr);
+            }
           }
         } catch (err) {
           console.warn('⚠️ Order-accepted email failed:', err?.message || err);
