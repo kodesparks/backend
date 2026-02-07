@@ -6,7 +6,7 @@ import User from '../../models/User.js';
 import mongoose from 'mongoose';
 import zohoBooksService from '../../utils/zohoBooks.js';
 import { sendOrderAcceptedEmail, sendQuoteReadyEmail, sendSalesOrderReadyEmail, sendInvoiceReadyEmail } from '../../utils/emailService.js';
-import { getPublicQuotePdfUrl } from './customer.js';
+import { getPublicQuotePdfUrl, getPublicSalesOrderPdfUrl, getPublicInvoicePdfUrl, getOrderNotificationContact } from './customer.js';
 
 // Get all orders (Admin)
 export const getAllOrders = async (req, res) => {
@@ -554,10 +554,14 @@ export const markPaymentDone = async (req, res) => {
           if (zohoSO?.salesorder_id) {
             await Order.updateOne({ _id: order._id }, { $set: { zohoSalesOrderId: zohoSO.salesorder_id } });
             console.log(`✅ Zoho Sales Order created: ${zohoSO.salesorder_id} for order ${order.leadId}`);
+            if (customer?.zohoCustomerId) {
+              await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
+            }
             await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch(() => {});
-            if (customer?.email) {
-              const pdfUrl = await zohoBooksService.getSalesOrderPDFUrl(zohoSO.salesorder_id).catch(() => null);
-              await sendSalesOrderReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+            const notif = getOrderNotificationContact(order, customer);
+            if (notif.email) {
+              const pdfUrl = getPublicSalesOrderPdfUrl(order.leadId);
+              await sendSalesOrderReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
         } catch (error) {
@@ -774,15 +778,15 @@ export const updateOrderStatus = async (req, res) => {
             await Order.updateOne({ _id: order._id }, { $set: { zohoQuoteId: zohoQuote.estimate_id } });
             console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId}`);
             if (customer.zohoCustomerId) {
-              await zohoBooksService.syncContactForEmail(customer.zohoCustomerId, customer).catch(() => {});
+              await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
             }
             await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch((err) => {
               console.warn(`⚠️ Quote email (Zoho) failed for order ${order.leadId}:`, err?.message || err);
             });
-            // Always send our SMTP email with public PDF URL (our link works without Zoho login)
-            if (customer.email) {
+            const notif = getOrderNotificationContact(order, customer);
+            if (notif.email) {
               const pdfUrl = getPublicQuotePdfUrl(order.leadId);
-              await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+              await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
         } catch (error) {
@@ -803,11 +807,14 @@ export const updateOrderStatus = async (req, res) => {
           if (zohoSO?.salesorder_id) {
             await Order.updateOne({ _id: order._id }, { $set: { zohoSalesOrderId: zohoSO.salesorder_id } });
             console.log(`✅ Zoho Sales Order created: ${zohoSO.salesorder_id} for order ${order.leadId}`);
+            if (customer?.zohoCustomerId) {
+              await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
+            }
             await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch(() => {});
-            // Always send our SMTP email with public PDF URL
-            if (customer?.email) {
-              const pdfUrl = await zohoBooksService.getSalesOrderPDFUrl(zohoSO.salesorder_id).catch(() => null);
-              await sendSalesOrderReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+            const notifSO = getOrderNotificationContact(order, customer);
+            if (notifSO.email) {
+              const pdfUrl = getPublicSalesOrderPdfUrl(order.leadId);
+              await sendSalesOrderReadyEmail(notifSO.email, notifSO.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
         } catch (error) {
@@ -832,13 +839,16 @@ export const updateOrderStatus = async (req, res) => {
             currentOrder.zohoInvoiceId = zohoInvoice.invoice_id;
             await currentOrder.save();
             console.log(`✅ Zoho Invoice created: ${zohoInvoice.invoice_id} for order ${currentOrder.leadId}`);
+            if (customer?.zohoCustomerId) {
+              await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, currentOrder, customer).catch(() => {});
+            }
             await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch((err) => {
               console.warn(`⚠️ Invoice email (Zoho) failed for order ${currentOrder.leadId}:`, err?.message || err);
             });
-            // Always send our SMTP email with public PDF URL
-            if (customer?.email) {
-              const pdfUrl = await zohoBooksService.getInvoicePDFUrl(zohoInvoice.invoice_id).catch(() => null);
-              await sendInvoiceReadyEmail(customer.email, customer.name || 'Customer', currentOrder.leadId, currentOrder.formattedLeadId, pdfUrl).catch(() => {});
+            const notifInv = getOrderNotificationContact(currentOrder, customer);
+            if (notifInv.email) {
+              const pdfUrl = getPublicInvoicePdfUrl(currentOrder.leadId);
+              await sendInvoiceReadyEmail(notifInv.email, notifInv.name, currentOrder.leadId, currentOrder.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
         } catch (err) {
@@ -1206,12 +1216,13 @@ export const downloadQuotePDF = async (req, res) => {
             await Order.updateOne({ _id: order._id }, { $set: { zohoQuoteId: zohoQuote.estimate_id } });
             order.zohoQuoteId = zohoQuote.estimate_id;
             if (customer.zohoCustomerId) {
-              await zohoBooksService.syncContactForEmail(customer.zohoCustomerId, customer).catch(() => {});
+              await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
             }
             await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => false);
-            if (customer.email) {
+            const notif = getOrderNotificationContact(order, customer);
+            if (notif.email) {
               const pdfUrl = getPublicQuotePdfUrl(order.leadId);
-              await sendQuoteReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
+              await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Quote created on-demand for order ${order.leadId} (admin PDF request)`);
           }
@@ -1284,10 +1295,14 @@ export const downloadInvoicePDF = async (req, res) => {
           if (zohoInvoice?.invoice_id) {
             await Order.updateOne({ _id: order._id }, { $set: { zohoInvoiceId: zohoInvoice.invoice_id } });
             order.zohoInvoiceId = zohoInvoice.invoice_id;
+            if (customer.zohoCustomerId) {
+              await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
+            }
             await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch(() => {});
-            if (customer.email) {
-              const pdfUrl = await zohoBooksService.getInvoicePDFUrl(zohoInvoice.invoice_id).catch(() => null);
-              await sendInvoiceReadyEmail(customer.email, customer.name || 'Customer', order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
+            const notif = getOrderNotificationContact(order, customer);
+            if (notif.email) {
+              const pdfUrl = getPublicInvoicePdfUrl(order.leadId);
+              await sendInvoiceReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Invoice created on-demand for order ${order.leadId} (admin PDF request)`);
           }

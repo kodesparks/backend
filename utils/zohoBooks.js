@@ -1195,6 +1195,21 @@ class ZohoBooksService {
   }
 
   /**
+   * Sync Zoho contact with the email/name from the order (place-order payload) so Zoho's
+   * email estimate/SO/invoice API can send to that address. Call before emailEstimate, emailSalesOrder, emailInvoice.
+   */
+  async syncContactWithOrderEmail(contactId, order, customer) {
+    if (!contactId || !customer) return;
+    const forZoho = {
+      email: (order?.orderEmail && String(order.orderEmail).trim()) || customer.email || '',
+      phone: customer.phone || '',
+      name: (order?.orderReceiverName && String(order.orderReceiverName).trim()) || customer.name || 'Customer'
+    };
+    if (!forZoho.email && !forZoho.phone) return;
+    return this._syncContactEmailToZoho(contactId, forZoho);
+  }
+
+  /**
    * Sync our User's email/phone to Zoho contact and ensure primary contact person exists
    * so Zoho shows "Primary contact information" and can send quote/SO/invoice emails.
    */

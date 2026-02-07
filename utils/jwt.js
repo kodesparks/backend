@@ -85,3 +85,41 @@ export const verifyQuotePdfToken = (token) => {
     return null;
   }
 };
+
+/** Token for public Sales Order PDF link (email). Valid 30 days. */
+export const generateSalesOrderPdfToken = (leadId) => {
+  if (!ACCESS_TOKEN_SECRET) return null;
+  return jwt.sign(
+    { leadId: String(leadId), purpose: 'sales-order-pdf' },
+    ACCESS_TOKEN_SECRET,
+    { expiresIn: '30d' }
+  );
+};
+
+export const verifySalesOrderPdfToken = (token) => {
+  try {
+    const payload = jwt.verify(token, ACCESS_TOKEN_SECRET);
+    return payload?.purpose === 'sales-order-pdf' && payload?.leadId ? payload : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Token for public Invoice PDF link (email). Valid 30 days. */
+export const generateInvoicePdfToken = (leadId) => {
+  if (!ACCESS_TOKEN_SECRET) return null;
+  return jwt.sign(
+    { leadId: String(leadId), purpose: 'invoice-pdf' },
+    ACCESS_TOKEN_SECRET,
+    { expiresIn: '30d' }
+  );
+};
+
+export const verifyInvoicePdfToken = (token) => {
+  try {
+    const payload = jwt.verify(token, ACCESS_TOKEN_SECRET);
+    return payload?.purpose === 'invoice-pdf' && payload?.leadId ? payload : null;
+  } catch {
+    return null;
+  }
+};

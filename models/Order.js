@@ -141,6 +141,10 @@ const orderSchema = new mongoose.Schema({
     default: '0000000000',
     match: /^[6-9]\d{9}$|^0000000000$/
   },
+  /** Email provided at place order (for quote/SO/invoice notifications). Fallback: customer profile. */
+  orderEmail: { type: String, required: false, default: null },
+  /** Receiver name provided at place order (for email salutation). */
+  orderReceiverName: { type: String, required: false, default: null },
   
   // Promo Information (Optional)
   promoCode: {
