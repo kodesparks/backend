@@ -18,6 +18,8 @@ import {
   getOrderChangeHistory,
   downloadQuotePDF,
   getPublicQuotePDF,
+  getPublicSalesOrderPDF,
+  getPublicInvoicePDF,
   downloadPurchaseOrderPDF,
   downloadSalesOrderPDF,
   downloadInvoicePDF
@@ -195,8 +197,10 @@ const leadIdValidation = [
 
 // ==================== CUSTOMER ROUTES ====================
 
-// Public quote PDF (no auth) – link in quote-ready email
+// Public PDFs (no auth) – links in quote/SO/invoice emails
 router.get('/quote-pdf', getPublicQuotePDF);
+router.get('/sales-order-pdf', getPublicSalesOrderPDF);
+router.get('/invoice-pdf', getPublicInvoicePDF);
 
 // Add item to cart (Create order)
 router.post('/cart/add', 
