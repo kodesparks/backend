@@ -1532,9 +1532,9 @@ class ZohoBooksService {
         const realName = (inventoryItem?.itemDescription || inventoryItem?.name || 'Item').trim();
         const nameForZoho = realName.length ? realName.substring(0, 255) : 'Item';
         if (itemId) {
-          lineItems.push({ item_id: itemId, rate: orderItem.unitPrice, quantity: orderItem.qty });
+          lineItems.push({ item_id: itemId, rate: orderItem.unitPrice, quantity: orderItem.qty, loadingCharges: orderItem.loadingCharges });
         } else {
-          lineItems.push({ name: nameForZoho, rate: orderItem.unitPrice, quantity: orderItem.qty });
+          lineItems.push({ name: nameForZoho, rate: orderItem.unitPrice, quantity: orderItem.qty, loadingCharges: orderItem.loadingCharges });
         }
       }
 
@@ -1543,6 +1543,11 @@ class ZohoBooksService {
       if (!deliveryAddr) {
         console.warn(`⚠️  Quote will use Zoho contact address: order has no valid delivery address (order.deliveryAddress missing or "Address to be updated"). Ensure place order API was called with deliveryAddress.`);
       }
+
+      const totalLoadingCharges = order.items.reduce(
+        (sum, item) => sum + (item.loadingCharges || 0),
+        0
+      );
 
       // Build Quote payload (Zoho Estimates API)
       // reference_number = our order ID (leadId) for sync between our system and Zoho
@@ -1554,10 +1559,10 @@ class ZohoBooksService {
         line_items: lineItems,
         is_inclusive_tax: true
       };
-      
+ 
       // Add shipping charge if present
       if (order.deliveryCharges && order.deliveryCharges > 0) {
-        quoteData.shipping_charge = String(order.deliveryCharges.toFixed(2));
+        quoteData.shipping_charge = String(totalLoadingCharges.toFixed(2));
       }
       
       // Add billing and shipping addresses (full address from order)
@@ -1580,7 +1585,7 @@ class ZohoBooksService {
           if (order.deliveryPincode) updateData.cf_delivery_pincode = order.deliveryPincode;
           if (order.deliveryExpectedDate) updateData.cf_delivery_expected_date = new Date(order.deliveryExpectedDate).toISOString().split('T')[0];
           if (order.totalQty) updateData.cf_total_quantity = order.totalQty;
-          if (order.deliveryCharges) updateData.cf_delivery_charges = order.deliveryCharges;
+          if (order.deliveryCharges) updateData.cf_delivery_charges = totalLoadingCharges;
           
           if (Object.keys(updateData).length > 0) {
             // Estimates API expects data WITHOUT { estimate: {...} } wrapper

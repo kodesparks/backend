@@ -707,7 +707,19 @@ router.put('/admin/orders/:leadId/status',
     body('truckNumber').optional().isString(),
     body('vehicleType').optional().isString(),
     body('capacityTons').optional().isNumeric(),
-    body('deliveryNotes').optional().isString()
+    body('deliveryNotes').optional().isString(),
+    body('unitPrice')
+      .if(body('orderStatus').isIn(['vendor_accepted']))
+      .notEmpty()
+      .withMessage('Unit price is required for this order status')
+      .isNumeric()
+      .withMessage('Unit price must be a number'),
+    body('loadingCharges')
+      .if(body('orderStatus').isIn(['vendor_accepted']))
+      .notEmpty()
+      .withMessage('Loading charges are required for this order status')
+      .isNumeric()
+      .withMessage('Loading charges must be a number'),
   ],
   updateOrderStatus
 );

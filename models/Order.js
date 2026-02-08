@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-
 const orderSchema = new mongoose.Schema({
   // Lead ID - Primary Key (Order ID) with category prefix
   leadId: {
@@ -7,7 +6,7 @@ const orderSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
-  
+
   // Customer Information
   custUserId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -35,6 +34,11 @@ const orderSchema = new mongoose.Schema({
     totalCost: {
       type: Number,
       required: true,
+      min: 0
+    },
+    loadingCharges: {
+      type: Number,
+      default: 0,
       min: 0
     }
   }],

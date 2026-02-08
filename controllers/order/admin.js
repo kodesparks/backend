@@ -665,7 +665,9 @@ export const updateOrderStatus = async (req, res) => {
       truckNumber,
       vehicleType,
       capacityTons,
-      deliveryNotes
+      deliveryNotes,
+      unitPrice,
+      loadingCharges
     } = req.body || {};
 
     if (!orderStatus) {
@@ -698,12 +700,31 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
+    if (
+      ['vendor_accepted'].includes(orderStatus) &&
+      (!unitPrice || !loadingCharges)
+    ) {
+      return res.status(400).json({
+        message: 'Unit price and loading charges are required for this status'
+      });
+    }
     // Store previous status before updating
     const previousStatus = order.orderStatus;
 
     // Update order status
     await order.updateStatus(orderStatus);
 
+    //update admin pricing
+    if (['vendor_accepted'].includes(orderStatus)) {
+      order.items = order.items.map(item => {
+        item.unitPrice = Number(unitPrice);
+        item.loadingCharges = Number(loadingCharges);
+        item.totalCost = (item.qty * unitPrice) + Number(loadingCharges);
+        return item;
+      });
+
+      await order.save();
+    }
     // Create status update
     await OrderStatus.createStatusUpdate(
       order.leadId,
