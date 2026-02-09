@@ -195,7 +195,7 @@ export async function sendQuoteReadyEmail(to, name, leadId, formattedLeadId, pdf
   const html = `
     <p>Hi ${name || 'Customer'},</p>
     <p>Your quote for order <strong>${formattedLeadId || leadId || '–'}</strong> is ready.</p>
-    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Quote PDF</a></p><p>Or copy: ${pdfUrl}</p>` : ''}
+    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Quote PDF</a></p>` : ''}
     <p>Please log in to your account to view and download the quote.</p>
     ${orderUrl !== 'your account' ? `<p><a href="${orderUrl}" style="color:#2563eb;">View my orders</a></p>` : ''}
     <p>Thank you.</p>
@@ -224,7 +224,7 @@ export async function sendSalesOrderReadyEmail(to, name, leadId, formattedLeadId
   const html = `
     <p>Hi ${name || 'Customer'},</p>
     <p>Your sales order for <strong>${formattedLeadId || leadId || '–'}</strong> is ready.</p>
-    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Sales Order PDF</a></p><p>Or copy: ${pdfUrl}</p>` : ''}
+    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Sales Order PDF</a></p>` : ''}
     <p>You can also log in to your account to view and download.</p>
     ${orderUrl !== 'your account' ? `<p><a href="${orderUrl}" style="color:#2563eb;">View my orders</a></p>` : ''}
     <p>Thank you.</p>
@@ -253,7 +253,7 @@ export async function sendInvoiceReadyEmail(to, name, leadId, formattedLeadId, p
   const html = `
     <p>Hi ${name || 'Customer'},</p>
     <p>Your invoice for order <strong>${formattedLeadId || leadId || '–'}</strong> is ready.</p>
-    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Invoice PDF</a></p><p>Or copy: ${pdfUrl}</p>` : ''}
+    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View Invoice PDF</a></p>` : ''}
     <p>You can also log in to your account to view and download.</p>
     ${orderUrl !== 'your account' ? `<p><a href="${orderUrl}" style="color:#2563eb;">View my orders</a></p>` : ''}
     <p>Thank you.</p>
