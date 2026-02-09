@@ -642,7 +642,7 @@ class ZohoBooksService {
         date: new Date().toISOString().split('T')[0],
         reference_number: order.leadId || '',
         line_items: lineItems,
-        is_inclusive_tax: true
+        is_inclusive_tax: false
       };
       
       // Add shipping charge if present
@@ -869,7 +869,7 @@ class ZohoBooksService {
         date: new Date().toISOString().split('T')[0],
         reference_number: order.leadId || '',
         line_items: lineItems,
-        is_inclusive_tax: true
+        is_inclusive_tax: false
       };
       if (zohoCustomerId) {
         invoiceData.customer_id = zohoCustomerId;
@@ -1568,7 +1568,7 @@ class ZohoBooksService {
         date: new Date().toISOString().split('T')[0],
         reference_number: order.leadId || '',
         line_items: lineItems,
-        is_inclusive_tax: true
+        is_inclusive_tax: false
       };
  
       // Add shipping charge if present
