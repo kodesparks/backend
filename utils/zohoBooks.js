@@ -1307,6 +1307,42 @@ class ZohoBooksService {
   }
 
   /**
+ * Ensure Zoho customer (contact) is ACTIVE before creating Quotes / Sales Orders / Invoices.
+ * Zoho does not allow transactions for inactive customers.
+ *
+ * Flow:
+ * 1. Fetch contact details from Zoho
+ * 2. Check active status
+ * 3. If inactive, activate the contact
+ */
+  async ensureZohoCustomerIsActive(contactId) {
+  // Get customer details
+  const response = await this.makeRequest(
+    'GET',
+    `contacts/${contactId}`
+  );
+
+  const contact = response.contact;
+
+  if (!contact) {
+    throw new Error('Zoho customer not found');
+  }
+
+  // Activate if inactive
+  if (!contact.is_active) {
+    console.log(`⚠️ Zoho customer inactive. Activating: ${contact.contact_name}`);
+
+    await this.makeRequest(
+      'PUT',
+      `contacts/${contactId}`,
+      { is_active: true }
+    );
+
+    console.log('✅ Zoho customer activated');
+  }
+}
+
+  /**
    * Create or get Customer in Zoho Books
    * @param {Object} customer - User object with customer role (must have name, email/phone from onboard)
    * @returns {Promise<string>} Zoho Customer ID
@@ -1316,6 +1352,7 @@ class ZohoBooksService {
       // If customer already has Zoho ID, sync email/phone from our User model then return
       if (customer.zohoCustomerId) {
         await this._syncContactEmailToZoho(customer.zohoCustomerId, customer);
+        await this.ensureZohoCustomerIsActive(customer.zohoCustomerId);
         return customer.zohoCustomerId;
       }
 
