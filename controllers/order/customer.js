@@ -542,7 +542,7 @@ export const updateOrder = async (req, res) => {
 
     const { leadId } = req.params;
     const customerId = req.user.userId;
-    const { items, deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum } = req.body;
+    const { items, deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, accNumber, utrNum } = req.body;
 
     const order = await Order.findOne({
       leadId,
@@ -582,7 +582,11 @@ export const updateOrder = async (req, res) => {
     if (deliveryPincode) order.deliveryPincode = deliveryPincode;
     if (deliveryExpectedDate) order.deliveryExpectedDate = deliveryExpectedDate;
     if (receiverMobileNum) order.receiverMobileNum = receiverMobileNum;
-
+    order.customerPaymentDetails = {
+      ...order.customerPaymentDetails,
+      ...(utrNum && { utrNum }),
+      ...(accNumber && { accNum: accNumber })
+    };
     await order.save();
 
     // Create status update

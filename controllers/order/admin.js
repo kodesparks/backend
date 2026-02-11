@@ -702,8 +702,7 @@ export const updateOrderStatus = async (req, res) => {
       vehicleType,
       capacityTons,
       deliveryNotes,
-      unitPrice,
-      loadingCharges
+      items
     } = req.body || {};
 
     if (!orderStatus) {
@@ -736,13 +735,12 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    if (
-      ['vendor_accepted'].includes(orderStatus) &&
-      (!unitPrice || !loadingCharges)
-    ) {
-      return res.status(400).json({
-        message: 'Unit price and loading charges are required for this status'
-      });
+    if (orderStatus === 'vendor_accepted') {
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({
+          message: 'Items with pricing are required'
+        });
+      }
     }
     // Store previous status before updating
     const previousStatus = order.orderStatus;
@@ -751,16 +749,54 @@ export const updateOrderStatus = async (req, res) => {
     await order.updateStatus(orderStatus);
 
     //update admin pricing
-    if (['vendor_accepted'].includes(orderStatus)) {
-      order.items = order.items.map(item => {
-        item.unitPrice = Number(unitPrice);
-        item.loadingCharges = Number(loadingCharges);
-        item.totalCost = (item.qty * unitPrice) + Number(loadingCharges);
-        return item;
-      });
+    if (orderStatus === 'vendor_accepted') {
+      for (const updatedItem of items) {
+        const orderItem = order.items.find(
+          i => i.itemCode.toString() === updatedItem.itemCode
+        );
+        if (!orderItem) {
+          return res.status(400).json({
+            message: `Invalid itemCode: ${updatedItem.itemCode}`
+          });
+        }
+        const unitPrice = Number(updatedItem.unitPrice);
+        const loadingCharges = Number(updatedItem.loadingCharges || 0);
+
+        if (!unitPrice || isNaN(unitPrice) || unitPrice <= 0) {
+          return res.status(400).json({
+            message: 'Valid unit price required for all items'
+          });
+        }
+
+        if (isNaN(loadingCharges) || loadingCharges < 0) {
+          return res.status(400).json({
+            message: 'Valid loading charges required'
+          });
+        }
+
+        orderItem.unitPrice = unitPrice;
+        orderItem.loadingCharges = loadingCharges;
+
+        orderItem.totalCost =
+          (orderItem.qty * unitPrice) + loadingCharges;
+      }
+
+      // Recalculate totals
+      order.totalQty = order.items.reduce(
+        (sum, item) => sum + item.qty,
+        0
+      );
+
+      const itemsTotal = order.items.reduce(
+        (sum, item) => sum + item.totalCost,
+        0
+      );
+
+      order.totalAmount = itemsTotal;
+    }
 
       await order.save();
-    }
+    
     // Create status update
     await OrderStatus.createStatusUpdate(
       order.leadId,

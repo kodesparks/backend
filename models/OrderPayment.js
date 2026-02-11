@@ -20,7 +20,7 @@ const orderPaymentSchema = new mongoose.Schema({
   // Payment Information
   paymentType: {
     type: String,
-    enum: ['credit_card', 'debit_card', 'upi', 'net_banking', 'wallet', 'cash_on_delivery', 'bank_transfer'],
+    enum: ['credit_card', 'debit_card', 'upi', 'net_banking', 'wallet', 'cash_on_delivery', 'bank_transfer', 'manual_utr'],
     required: true
   },
   
@@ -69,6 +69,12 @@ const orderPaymentSchema = new mongoose.Schema({
   
   // UTR Number (for bank transfers)
   utrNum: {
+    type: String,
+    default: null
+  },
+
+  // Account Number
+  accNumber: {
     type: String,
     default: null
   },

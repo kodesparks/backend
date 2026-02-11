@@ -14,6 +14,17 @@ const orderSchema = new mongoose.Schema({
     required: true
   },
   
+  // Customer Payment Details
+  customerPaymentDetails: {
+    utrNum: {
+      type: String,
+      trim: true
+    },
+    accNum: {
+      type: String,
+      trim: true
+    }
+  },
   // Order Items (Multiple items from same vendor)
   items: [{
     itemCode: {
@@ -247,16 +258,16 @@ orderSchema.pre('save', function(next) {
   if (this.isModified('items')) {
     this.totalQty = this.items.reduce((sum, item) => sum + item.qty, 0);
     this.totalAmount = this.items.reduce((sum, item) => sum + item.totalCost, 0);
-    const loadingCharges = this.items.reduce((sum, item) => sum + (item.loadingCharges || 0), 0);
+    // const loadingCharges = this.items.reduce((sum, item) => sum + (item.loadingCharges || 0), 0);
     
     // Add delivery charges to total amount
     // if (this.deliveryCharges && this.deliveryCharges > 0) {
     //   this.totalAmount += this.deliveryCharges;
     // }
     
-    if (loadingCharges && loadingCharges > 0) {
-      this.totalAmount += loadingCharges;
-    }
+    // if (loadingCharges && loadingCharges > 0) {
+    //   this.totalAmount += loadingCharges;
+    // }
     
     // Apply promo discount if exists
     if (this.promoDiscount > 0) {

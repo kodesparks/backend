@@ -125,7 +125,15 @@ const updateOrderValidation = [
   body('receiverMobileNum')
     .optional()
     .matches(/^[6-9]\d{9}$/)
-    .withMessage('Valid receiver mobile number is required')
+    .withMessage('Valid receiver mobile number is required'),
+  body('utrNum')
+    .optional()
+    .matches(/^[A-Za-z0-9]{8,25}$/)
+    .withMessage('Valid UTR number is required'),
+  body('accNumber')
+    .optional()
+    .matches(/^[0-9]{9,18}$/)
+    .withMessage('Valid account number is required')
 ];
 
 const placeOrderValidation = [
@@ -712,18 +720,28 @@ router.put('/admin/orders/:leadId/status',
     body('vehicleType').optional().isString(),
     body('capacityTons').optional().isNumeric(),
     body('deliveryNotes').optional().isString(),
-    body('unitPrice')
-      .if(body('orderStatus').isIn(['vendor_accepted']))
+     body('items')
+      .if(body('orderStatus').equals('vendor_accepted'))
+      .isArray({ min: 1 })
+      .withMessage('Items with pricing are required'),
+
+    body('items.*.itemCode')
+      .if(body('orderStatus').equals('vendor_accepted'))
       .notEmpty()
-      .withMessage('Unit price is required for this order status')
+      .withMessage('Item code is required'),
+
+    body('items.*.unitPrice')
+      .if(body('orderStatus').equals('vendor_accepted'))
+      .notEmpty()
+      .withMessage('Unit price is required for all items')
       .isNumeric()
       .withMessage('Unit price must be a number'),
-    body('loadingCharges')
-      .if(body('orderStatus').isIn(['vendor_accepted']))
-      .notEmpty()
-      .withMessage('Loading charges are required for this order status')
+
+    body('items.*.loadingCharges')
+      .if(body('orderStatus').equals('vendor_accepted'))
+      .optional()
       .isNumeric()
-      .withMessage('Loading charges must be a number'),
+      .withMessage('Loading charges must be a number')
   ],
   updateOrderStatus
 );
