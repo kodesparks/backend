@@ -19,7 +19,11 @@ export const getAllOrders = async (req, res) => {
     };
 
     let query = { isActive: true };
-    if (status) query.orderStatus = status;
+    if (status) {
+      query.orderStatus = status;
+    } else {
+      query.orderStatus = { $ne: 'pending' };
+    }
     if (vendorId) query.vendorId = vendorId;
     if (customerId) query.custUserId = customerId;
 

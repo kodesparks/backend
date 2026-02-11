@@ -21,7 +21,7 @@ export function getOrderNotificationContact(order, customer) {
 }
 
 // Add item to cart (Create order)
-export const addToCart = async (req, res) => {
+export const addToCartNew = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -212,6 +212,189 @@ export const addToCart = async (req, res) => {
   }
 };
 
+//New add to cart (Create order)
+
+export const addToCart = async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { itemCode, qty, deliveryPincode } = req.body;
+    const customerId = req.user.userId;
+
+    // 1️⃣ Get inventory item
+    const inventoryItem = await Inventory.findById(itemCode);
+    if (!inventoryItem || !inventoryItem.isActive) {
+      return res.status(404).json({ message: 'Item not available' });
+    }
+
+    if (!inventoryItem.pricing?.unitPrice) {
+      return res.status(404).json({ message: 'Pricing not found for this item' });
+    }
+
+    const vendorId = inventoryItem.vendorId || null;
+
+    // 2️⃣ Calculate delivery charges (same logic as before)
+    let deliveryCharges = 0;
+    let deliveryDetails = null;
+
+    if (deliveryPincode && inventoryItem.warehouses?.length) {
+      try {
+        const pincodeResult = await geocodingService.validatePincode(deliveryPincode);
+        if (pincodeResult.success) {
+          const customerLocation = pincodeResult.data.location;
+
+          let nearestWarehouse = null;
+          let minDistance = Infinity;
+          let distance = 0;
+
+          for (const warehouse of inventoryItem.warehouses) {
+            if (warehouse.isActive && warehouse.location?.coordinates) {
+              const d = distanceService.calculateDistance(
+                warehouse.location.coordinates,
+                customerLocation
+              );
+              if (d < minDistance) {
+                minDistance = d;
+                nearestWarehouse = warehouse;
+                distance = d;
+              }
+            }
+          }
+
+          if (nearestWarehouse) {
+            const deliveryChargeDetails =
+              distanceService.calculateDeliveryCharges(
+                distance,
+                nearestWarehouse.deliveryConfig,
+                inventoryItem.pricing.unitPrice
+              );
+
+            deliveryCharges = deliveryChargeDetails.totalDeliveryCharge;
+            deliveryDetails = {
+              distance: Math.round(distance * 100) / 100,
+              warehouse: nearestWarehouse.warehouseName
+            };
+          }
+        }
+      } catch (err) {
+        console.error('Delivery calc failed:', err.message);
+      }
+    }
+
+    // 3️⃣ Find existing pending order for same customer + vendor
+    let order = await Order.findOne({
+      custUserId: customerId,
+      vendorId,
+      orderStatus: 'pending',
+      isActive: true
+    });
+
+    const itemUnitPrice = inventoryItem.pricing.unitPrice;
+    const itemTotalCost = qty * itemUnitPrice;
+
+    // 4️⃣ If order exists → update it
+    if (order) {
+      const itemIndex = order.items.findIndex(
+        (i) => i.itemCode.toString() === itemCode
+      );
+
+      if (itemIndex > -1) {
+        order.items[itemIndex].qty += qty;
+        order.items[itemIndex].totalCost =
+          order.items[itemIndex].qty * order.items[itemIndex].unitPrice;
+      } else {
+        order.items.push({
+          itemCode,
+          qty,
+          unitPrice: itemUnitPrice,
+          totalCost: itemTotalCost
+        });
+      }
+
+      order.totalQty = order.items.reduce((s, i) => s + i.qty, 0);
+      const itemsTotal = order.items.reduce((s, i) => s + i.totalCost, 0);
+
+      order.deliveryCharges = deliveryCharges;
+      order.totalAmount = itemsTotal + deliveryCharges;
+
+      await order.save();
+
+      await order.populate([
+        { path: 'items.itemCode', select: 'itemDescription category subCategory primaryImage' },
+        { path: 'vendorId', select: 'name email phone' }
+      ]);
+
+      return res.status(200).json({
+        message: 'Item added to existing cart',
+        order
+      });
+    }
+
+    // 5️⃣ Else → create new order
+    const orderItems = [{
+      itemCode,
+      qty,
+      unitPrice: itemUnitPrice,
+      totalCost: itemTotalCost
+    }];
+
+    const leadId = await Order.generateLeadId(orderItems);
+
+    order = new Order({
+      leadId,
+      custUserId: customerId,
+      vendorId,
+      items: orderItems,
+      totalQty: qty,
+      deliveryCharges,
+      totalAmount: itemTotalCost + deliveryCharges,
+      deliveryAddress: req.body.deliveryAddress || 'Address to be updated',
+      deliveryPincode: deliveryPincode || '000000',
+      deliveryExpectedDate:
+        req.body.deliveryExpectedDate ||
+        new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      custPhoneNum: req.body.custPhoneNum || req.user.phone,
+      receiverMobileNum: req.body.receiverMobileNum || req.user.phone,
+      orderStatus: 'pending',
+      isActive: true
+    });
+
+    await order.save();
+
+    await OrderStatus.createStatusUpdate(
+      order.leadId,
+      order.invcNum,
+      order.vendorId,
+      'pending',
+      customerId,
+      'Order created and added to cart'
+    );
+
+    await order.populate([
+      { path: 'items.itemCode', select: 'itemDescription category subCategory primaryImage' },
+      { path: 'vendorId', select: 'name email phone' }
+    ]);
+
+    return res.status(201).json({
+      message: 'Item added to cart successfully',
+      order
+    });
+
+  } catch (error) {
+    console.error('Add to cart error:', error);
+    return res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
 // Get customer's cart/orders
 export const getCustomerOrders = async (req, res) => {
   try {
@@ -226,8 +409,9 @@ export const getCustomerOrders = async (req, res) => {
     let query = { custUserId: customerId, isActive: true };
     if (status) {
       query.orderStatus = status;
+    } else {
+      query.orderStatus = { $ne: 'pending' };
     }
-
     const orders = await Order.find(query)
       .populate('items.itemCode', 'itemDescription category subCategory primaryImage')
       .populate('vendorId', 'name email phone')
@@ -475,9 +659,60 @@ export const removeFromCart = async (req, res) => {
 };
 
 // Remove entire order from cart
+// export const removeOrderFromCart = async (req, res) => {
+//   try {
+//     const { leadId } = req.params;
+//     const customerId = req.user.userId;
+
+//     const order = await Order.findOne({
+//       leadId,
+//       custUserId: customerId,
+//       orderStatus: 'pending',
+//       isActive: true
+//     });
+
+//     if (!order) {
+//       return res.status(404).json({
+//         message: 'Order not found or cannot be removed'
+//       });
+//     }
+
+//     // Mark order as inactive (soft delete from cart only)
+//     order.isActive = false;
+//     await order.save();
+
+//     // Create status update (keep original status, just mark as removed from cart)
+//     await OrderStatus.createStatusUpdate(
+//       order.leadId,
+//       order.invcNum,
+//       order.vendorId,
+//       order.orderStatus, // Keep original status
+//       customerId,
+//       'Order removed from cart by customer'
+//     );
+
+//     res.status(200).json({
+//       message: 'Order removed from cart successfully',
+//       order: {
+//         leadId: order.leadId,
+//         orderStatus: order.orderStatus, // Will show original status (pending, order_placed, etc.)
+//         isActive: order.isActive // Will be false (removed from cart)
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('Remove order from cart error:', error);
+//     res.status(500).json({
+//       message: 'Internal server error',
+//       error: error.message
+//     });
+//   }
+// };
+
 export const removeOrderFromCart = async (req, res) => {
   try {
     const { leadId } = req.params;
+    const { itemCode } = req.body; // optional
     const customerId = req.user.userId;
 
     const order = await Order.findOne({
@@ -489,41 +724,106 @@ export const removeOrderFromCart = async (req, res) => {
 
     if (!order) {
       return res.status(404).json({
-        message: 'Order not found or cannot be removed'
+        message: 'Order not found or cannot be modified'
       });
     }
 
-    // Mark order as inactive (soft delete from cart only)
+    // 🔹 CASE 1: Remove specific item
+    if (itemCode) {
+      const initialLength = order.items.length;
+
+      order.items = order.items.filter(
+        item => item.itemCode.toString() !== itemCode
+      );
+
+      if (order.items.length === initialLength) {
+        return res.status(404).json({
+          message: 'Item not found in order'
+        });
+      }
+
+      // If no items left → deactivate entire order
+      if (order.items.length === 0) {
+        order.isActive = false;
+
+        await OrderStatus.createStatusUpdate(
+          order.leadId,
+          order.invcNum,
+          order.vendorId,
+          order.orderStatus,
+          customerId,
+          'Order removed from cart (last item deleted)'
+        );
+
+      } else {
+        // Recalculate totals
+        order.totalQty = order.items.reduce(
+          (sum, item) => sum + item.qty,
+          0
+        );
+
+        const itemsTotal = order.items.reduce(
+          (sum, item) => sum + item.totalCost,
+          0
+        );
+
+        order.totalAmount = itemsTotal + (order.deliveryCharges || 0);
+
+        await OrderStatus.createStatusUpdate(
+          order.leadId,
+          order.invcNum,
+          order.vendorId,
+          order.orderStatus,
+          customerId,
+          `Item removed from cart (${itemCode})`
+        );
+      }
+
+      await order.save();
+
+      return res.status(200).json({
+        message: 'Item removed from cart successfully',
+        order: {
+          leadId: order.leadId,
+          isActive: order.isActive,
+          totalQty: order.totalQty,
+          totalAmount: order.totalAmount,
+          items: order.items
+        }
+      });
+    }
+
+    // 🔹 CASE 2: Remove entire order (no itemCode provided)
     order.isActive = false;
     await order.save();
 
-    // Create status update (keep original status, just mark as removed from cart)
     await OrderStatus.createStatusUpdate(
       order.leadId,
       order.invcNum,
       order.vendorId,
-      order.orderStatus, // Keep original status
+      order.orderStatus,
       customerId,
       'Order removed from cart by customer'
     );
 
-    res.status(200).json({
+    return res.status(200).json({
       message: 'Order removed from cart successfully',
       order: {
         leadId: order.leadId,
-        orderStatus: order.orderStatus, // Will show original status (pending, order_placed, etc.)
-        isActive: order.isActive // Will be false (removed from cart)
+        orderStatus: order.orderStatus,
+        isActive: order.isActive
       }
     });
 
   } catch (error) {
     console.error('Remove order from cart error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       message: 'Internal server error',
       error: error.message
     });
   }
 };
+
 
 // Clear entire cart (remove all pending orders)
 // Download Quote PDF (created in Zoho when order is confirmed; created on-demand here if missing)
