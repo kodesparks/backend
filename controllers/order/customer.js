@@ -544,12 +544,23 @@ export const updateOrder = async (req, res) => {
     const customerId = req.user.userId;
     const { items, deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, accNumber, utrNum } = req.body;
 
-    const order = await Order.findOne({
-      leadId,
-      custUserId: customerId,
-      orderStatus: 'pending',
-      isActive: true
-    });
+    let order;
+    if(accNumber) {
+      order = await Order.findOne({
+        leadId,
+        custUserId: customerId,
+        orderStatus: 'vendor_accepted',
+        isActive: true
+      });
+    } else {
+      order = await Order.findOne({
+        leadId,
+        custUserId: customerId,
+        orderStatus: 'pending',
+        isActive: true
+      });
+    }
+    
 
     if (!order) {
       return res.status(404).json({
