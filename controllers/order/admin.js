@@ -570,7 +570,7 @@ export const markPaymentDone = async (req, res) => {
                 await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
                 const notifQuote = getOrderNotificationContact(currentOrder, customer);
                 if (notifQuote.email) {
-                  const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+                  const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
                   await sendQuoteReadyEmail(notifQuote.email, notifQuote.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
                   console.log(`✅ Quote-ready email (with PDF) sent for order ${order.leadId}`);
                 }
@@ -592,7 +592,7 @@ export const markPaymentDone = async (req, res) => {
             await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch(() => {});
             const notif = getOrderNotificationContact(order, customer);
             if (notif.email) {
-              const pdfUrl = getPublicSalesOrderPdfUrl(order.leadId);
+              const pdfUrl = await getPublicSalesOrderPdfUrl(order.leadId);
               await sendSalesOrderReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
@@ -862,7 +862,7 @@ export const updateOrderStatus = async (req, res) => {
                 await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
                 const notif = getOrderNotificationContact(order, customer);
                 if (notif.email) {
-                  const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+                  const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
                   await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
                   console.log(`✅ Quote-ready email (with PDF) sent to order email for ${order.leadId}`);
                 }
@@ -898,7 +898,7 @@ export const updateOrderStatus = async (req, res) => {
             });
             const notif = getOrderNotificationContact(order, customer);
             if (notif.email) {
-              const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+              const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
               await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
@@ -932,7 +932,7 @@ export const updateOrderStatus = async (req, res) => {
                 await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
                 const notifQuote = getOrderNotificationContact(currentOrder, customer);
                 if (notifQuote.email) {
-                  const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+                  const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
                   await sendQuoteReadyEmail(notifQuote.email, notifQuote.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
                   console.log(`✅ Quote-ready email (with PDF) sent for order ${order.leadId}`);
                 }
@@ -954,7 +954,7 @@ export const updateOrderStatus = async (req, res) => {
             await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch(() => {});
             const notifSO = getOrderNotificationContact(order, customer);
             if (notifSO.email) {
-              const pdfUrl = getPublicSalesOrderPdfUrl(order.leadId);
+              const pdfUrl = await getPublicSalesOrderPdfUrl(order.leadId);
               await sendSalesOrderReadyEmail(notifSO.email, notifSO.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
@@ -988,7 +988,7 @@ export const updateOrderStatus = async (req, res) => {
             });
             const notifInv = getOrderNotificationContact(currentOrder, customer);
             if (notifInv.email) {
-              const pdfUrl = getPublicInvoicePdfUrl(currentOrder.leadId);
+              const pdfUrl = await getPublicInvoicePdfUrl(currentOrder.leadId);
               await sendInvoiceReadyEmail(notifInv.email, notifInv.name, currentOrder.leadId, currentOrder.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
@@ -1362,7 +1362,7 @@ export const downloadQuotePDF = async (req, res) => {
             await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => false);
             const notif = getOrderNotificationContact(order, customer);
             if (notif.email) {
-              const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+              const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
               await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Quote created on-demand for order ${order.leadId} (admin PDF request)`);
@@ -1442,7 +1442,7 @@ export const downloadInvoicePDF = async (req, res) => {
             await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch(() => {});
             const notif = getOrderNotificationContact(order, customer);
             if (notif.email) {
-              const pdfUrl = getPublicInvoicePdfUrl(order.leadId);
+              const pdfUrl = await getPublicInvoicePdfUrl(order.leadId);
               await sendInvoiceReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Invoice created on-demand for order ${order.leadId} (admin PDF request)`);

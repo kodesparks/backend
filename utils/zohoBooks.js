@@ -1,5 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import OrderDelivery from '../models/OrderDelivery.js';
 
 // Load environment variables
 dotenv.config();
@@ -657,9 +658,10 @@ class ZohoBooksService {
         line_items: lineItems,
         is_inclusive_tax: false,
       };
-      
+
       if (totalLoadingCharges && totalLoadingCharges > 0) {
         salesOrderData.shipping_charge = String(totalLoadingCharges.toFixed(2));
+        salesOrderData.shipping_charge_tax_id = "3422894000000075399";
       }
       // Add shipping charge if present
       // if (order.deliveryCharges && order.deliveryCharges > 0) {
@@ -879,14 +881,27 @@ class ZohoBooksService {
       if (!deliveryAddr) {
         console.warn(`⚠️  Invoice will use Zoho contact address: order has no valid delivery address. Ensure place order API was called with deliveryAddress.`);
       }
-
+      const deliveryInfo = await OrderDelivery.findByOrder(order.leadId);
       // Don't provide invoice_number - let Zoho auto-generate it
       // is_inclusive_tax: true so total matches our order total (no extra GST added)
       let invoiceData = {
         date: new Date().toISOString().split('T')[0],
         reference_number: order.leadId || '',
         line_items: lineItems,
-        is_inclusive_tax: false
+        is_inclusive_tax: false,
+        custom_fields: [
+          {
+            label: "Delivery Pincode",
+            value: order.deliveryPincode
+          },
+          {
+            label: "Vehicle Number",
+            value: deliveryInfo.truckNumber
+          }
+        ],
+        terms: "Advance",
+        payment_terms: 0,
+        payment_terms_label: "Advance",
       };
       if (zohoCustomerId) {
         invoiceData.customer_id = zohoCustomerId;
@@ -900,6 +915,7 @@ class ZohoBooksService {
       // Add shipping charge if present
       if (totalLoadingCharges && totalLoadingCharges > 0) {
         invoiceData.shipping_charge = String(totalLoadingCharges.toFixed(2));
+        invoiceData.shipping_charge_tax_id = "3422894000000075399";
       }
       
       // Do NOT send billing_address/shipping_address on create – Zoho returns same error as Sales Order:
@@ -927,6 +943,19 @@ class ZohoBooksService {
             await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}`, updateData);
             console.log(`✅ Invoice updated with custom fields`);
           }
+          // console.log('createPaymentRecipt');
+          // const createPayRes = this.createPaymentReceipt(response.invoice?.invoice_id, {
+                
+          //   customer_id: customer.id || '',
+          //   invoice_id: response.invoice?.invoice_id,
+          //   payment_mode: 'cash', // cash, bank_transfer, online, etc.
+          //   amount: order.totalAmount,
+          //   date: new Date().toISOString().split('T')[0],
+          //   reference_number: '',
+          //   description: 'Payment received'
+          
+          // });
+          // console.log('createPayRes',createPayRes);
         } catch (updateError) {
           console.warn(`⚠️  Failed to update Invoice with custom fields:`, updateError.message);
           // Don't fail - invoice was created successfully
@@ -1628,12 +1657,14 @@ class ZohoBooksService {
         date: new Date().toISOString().split('T')[0],
         reference_number: order.leadId || '',
         line_items: lineItems,
-        is_inclusive_tax: false
+        is_inclusive_tax: false,
+        shipping_charge_tax_id: "3422894000000075399"
       };
  
       // Add shipping charge if present
       if (totalLoadingCharges && totalLoadingCharges > 0) {
-        quoteData.shipping_charge = String(totalLoadingCharges.toFixed(2));
+        quoteData.shipping_charge = String(totalLoadingCharges.toFixed(2));        
+        quoteData.shipping_charge_tax_id = "3422894000000075399"
       }
       
       // Add billing and shipping addresses (full address from order)

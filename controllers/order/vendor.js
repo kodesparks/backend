@@ -343,7 +343,7 @@ export const updateDeliveryTracking = async (req, res) => {
             });
             const notif = getOrderNotificationContact(currentOrder, customer);
             if (notif.email) {
-              const pdfUrl = getPublicInvoicePdfUrl(currentOrder.leadId);
+              const pdfUrl = await getPublicInvoicePdfUrl(currentOrder.leadId);
               await sendInvoiceReadyEmail(notif.email, notif.name, currentOrder.leadId, currentOrder.formattedLeadId, pdfUrl).catch(() => {});
             }
           }
@@ -386,7 +386,7 @@ export const updateDeliveryTracking = async (req, res) => {
               });
               const notif = getOrderNotificationContact(currentOrder, customer);
               if (notif.email) {
-                const pdfUrl = getPublicInvoicePdfUrl(currentOrder.leadId);
+                const pdfUrl = await getPublicInvoicePdfUrl(currentOrder.leadId);
                 await sendInvoiceReadyEmail(notif.email, notif.name, currentOrder.leadId, currentOrder.formattedLeadId, pdfUrl).catch(() => {});
               }
             }
@@ -661,7 +661,7 @@ export const updateVendorOrderStatus = async (req, res) => {
             });
             const notif = getOrderNotificationContact(currentOrder, customer);
             if (notif.email) {
-              const pdfUrl = getPublicInvoicePdfUrl(currentOrder.leadId);
+              const pdfUrl = await getPublicInvoicePdfUrl(currentOrder.leadId);
               await sendInvoiceReadyEmail(notif.email, notif.name, currentOrder.leadId, currentOrder.formattedLeadId, pdfUrl).catch(() => {});
             }
           }

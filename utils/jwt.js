@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -69,12 +70,13 @@ export const generateTokens = (user) => {
 
 /** Token for public quote PDF link (email). No login required; valid 30 days. */
 export const generateQuotePdfToken = (leadId) => {
-  if (!ACCESS_TOKEN_SECRET) return null;
-  return jwt.sign(
-    { leadId: String(leadId), purpose: 'quote-pdf' },
-    ACCESS_TOKEN_SECRET,
-    { expiresIn: '30d' }
-  );
+  return crypto.randomBytes(32).toString("hex");
+  // if (!ACCESS_TOKEN_SECRET) return null;
+  // return jwt.sign(
+  //   { leadId: String(leadId), purpose: 'quote-pdf' },
+  //   ACCESS_TOKEN_SECRET,
+  //   { expiresIn: '30d' }
+  // );
 };
 
 export const verifyQuotePdfToken = (token) => {
@@ -88,12 +90,13 @@ export const verifyQuotePdfToken = (token) => {
 
 /** Token for public Sales Order PDF link (email). Valid 30 days. */
 export const generateSalesOrderPdfToken = (leadId) => {
-  if (!ACCESS_TOKEN_SECRET) return null;
-  return jwt.sign(
-    { leadId: String(leadId), purpose: 'sales-order-pdf' },
-    ACCESS_TOKEN_SECRET,
-    { expiresIn: '30d' }
-  );
+  return crypto.randomBytes(32).toString("hex");
+  // if (!ACCESS_TOKEN_SECRET) return null;
+  // return jwt.sign(
+  //   { leadId: String(leadId), purpose: 'sales-order-pdf' },
+  //   ACCESS_TOKEN_SECRET,
+  //   { expiresIn: '30d' }
+  // );
 };
 
 export const verifySalesOrderPdfToken = (token) => {
@@ -107,12 +110,13 @@ export const verifySalesOrderPdfToken = (token) => {
 
 /** Token for public Invoice PDF link (email). Valid 30 days. */
 export const generateInvoicePdfToken = (leadId) => {
-  if (!ACCESS_TOKEN_SECRET) return null;
-  return jwt.sign(
-    { leadId: String(leadId), purpose: 'invoice-pdf' },
-    ACCESS_TOKEN_SECRET,
-    { expiresIn: '30d' }
-  );
+  return crypto.randomBytes(32).toString("hex");
+  // if (!ACCESS_TOKEN_SECRET) return null;
+  // return jwt.sign(
+  //   { leadId: String(leadId), purpose: 'invoice-pdf' },
+  //   ACCESS_TOKEN_SECRET,
+  //   { expiresIn: '30d' }
+  // );
 };
 
 export const verifyInvoicePdfToken = (token) => {

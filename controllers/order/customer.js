@@ -12,6 +12,7 @@ import zohoBooksService from '../../utils/zohoBooks.js';
 import { sendOrderPlacedEmail, sendQuoteReadyEmail, sendSalesOrderReadyEmail, sendInvoiceReadyEmail } from '../../utils/emailService.js';
 import User from '../../models/User.js';
 import { generateQuotePdfToken, verifyQuotePdfToken, generateSalesOrderPdfToken, verifySalesOrderPdfToken, generateInvoicePdfToken, verifyInvoicePdfToken } from '../../utils/jwt.js';
+import { createDocumentToken, validateToken } from '../../services/tokenService.js';
 
 /** Email and name for quote/SO/invoice notifications: prefer order-place values, else customer profile. */
 export function getOrderNotificationContact(order, customer) {
@@ -463,7 +464,7 @@ export const getOrderDetails = async (req, res) => {
         message: 'Order not found'
       });
     }
-
+    
     // Get order status history
     const statusHistory = await OrderStatus.getOrderStatusHistory(leadId);
 
@@ -876,7 +877,7 @@ export const downloadQuotePDF = async (req, res) => {
             await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => false);
             const notif = getOrderNotificationContact(order, customer);
             if (notif.email) {
-              const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+              const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
               await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Quote created on-demand for order ${order.leadId} (customer PDF request)`);
@@ -922,12 +923,14 @@ export const getPublicQuotePDF = async (req, res) => {
     if (!token) {
       return res.status(400).json({ message: 'Missing token' });
     }
-    const payload = verifyQuotePdfToken(token);
-    if (!payload?.leadId) {
+    const payload = await validateToken(token, "quote");
+    // const payload = verifyQuotePdfToken(token);
+    //docId is leadId here
+    if (!payload?.docId) {
       return res.status(403).json({ message: 'Invalid or expired link' });
     }
     const order = await Order.findOne({
-      leadId: payload.leadId,
+      leadId: payload.docId,
       isActive: true,
       zohoQuoteId: { $exists: true, $ne: null }
     });
@@ -952,9 +955,11 @@ export const getPublicSalesOrderPDF = async (req, res) => {
   try {
     const token = req.query.token;
     if (!token) return res.status(400).json({ message: 'Missing token' });
-    const payload = verifySalesOrderPdfToken(token);
-    if (!payload?.leadId) return res.status(403).json({ message: 'Invalid or expired link' });
-    const order = await Order.findOne({ leadId: payload.leadId, isActive: true, zohoSalesOrderId: { $exists: true, $ne: null } });
+    
+    const payload = await validateToken(token, "so");
+    // const payload = verifySalesOrderPdfToken(token);
+    if (!payload?.docId) return res.status(403).json({ message: 'Invalid or expired link' });
+    const order = await Order.findOne({ leadId: payload.docId, isActive: true, zohoSalesOrderId: { $exists: true, $ne: null } });
     if (!order?.zohoSalesOrderId) return res.status(404).json({ message: 'Sales Order not found or not ready yet' });
     const pdfBuffer = await zohoBooksService.getSalesOrderPDF(order.zohoSalesOrderId);
     res.setHeader('Content-Type', 'application/pdf');
@@ -971,9 +976,10 @@ export const getPublicInvoicePDF = async (req, res) => {
   try {
     const token = req.query.token;
     if (!token) return res.status(400).json({ message: 'Missing token' });
-    const payload = verifyInvoicePdfToken(token);
-    if (!payload?.leadId) return res.status(403).json({ message: 'Invalid or expired link' });
-    const order = await Order.findOne({ leadId: payload.leadId, isActive: true, zohoInvoiceId: { $exists: true, $ne: null } });
+    // const payload = verifyInvoicePdfToken(token);
+    const payload = await validateToken(token, "invoice");
+    if (!payload?.docId) return res.status(403).json({ message: 'Invalid or expired link' });
+    const order = await Order.findOne({ leadId: payload.docId, isActive: true, zohoInvoiceId: { $exists: true, $ne: null } });
     if (!order?.zohoInvoiceId) return res.status(404).json({ message: 'Invoice not found or not ready yet' });
     const pdfBuffer = await zohoBooksService.getInvoicePDF(order.zohoInvoiceId);
     res.setHeader('Content-Type', 'application/pdf');
@@ -986,23 +992,29 @@ export const getPublicInvoicePDF = async (req, res) => {
 };
 
 /** Build public quote PDF URL for email (no Zoho login required). */
-export function getPublicQuotePdfUrl(leadId) {
+export async function getPublicQuotePdfUrl(leadId) {
   const base = (process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
-  const token = generateQuotePdfToken(leadId);
+  // const token = generateQuotePdfToken(leadId);
+  const token = await createDocumentToken('quote', leadId);
+  console.log('token created');
   return token ? `${base}/api/order/quote-pdf?token=${token}` : null;
 }
 
 /** Build public Sales Order PDF URL for email. */
-export function getPublicSalesOrderPdfUrl(leadId) {
+export async function getPublicSalesOrderPdfUrl(leadId) {
   const base = (process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
-  const token = generateSalesOrderPdfToken(leadId);
+  // const token = generateSalesOrderPdfToken(leadId);
+  const token = await createDocumentToken('so', leadId);
+  console.log('token created for so');
   return token ? `${base}/api/order/sales-order-pdf?token=${token}` : null;
 }
 
 /** Build public Invoice PDF URL for email. */
-export function getPublicInvoicePdfUrl(leadId) {
+export async function getPublicInvoicePdfUrl(leadId) {
   const base = (process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
-  const token = generateInvoicePdfToken(leadId);
+  // const token = generateInvoicePdfToken(leadId);
+  const token = await createDocumentToken('invoice', leadId);
+  console.log('token created for so');
   return token ? `${base}/api/order/invoice-pdf?token=${token}` : null;
 }
 
@@ -1084,7 +1096,7 @@ export const downloadInvoicePDF = async (req, res) => {
             await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch(() => {});
             const notif = getOrderNotificationContact(order, customer);
             if (notif.email) {
-              const pdfUrl = getPublicInvoicePdfUrl(order.leadId);
+              const pdfUrl = await getPublicInvoicePdfUrl(order.leadId);
               await sendInvoiceReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId || order.leadId, pdfUrl).catch(() => {});
             }
             console.log(`✅ Invoice created on-demand for order ${order.leadId} (customer PDF request)`);
@@ -1425,7 +1437,7 @@ export const processPayment = async (req, res) => {
                   await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
                   const notifQuote = getOrderNotificationContact(orderForQuote, customer);
                   if (notifQuote.email) {
-                    const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+                    const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
                     await sendQuoteReadyEmail(notifQuote.email, notifQuote.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
                   }
                 }
@@ -1446,7 +1458,7 @@ export const processPayment = async (req, res) => {
               await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch(() => {});
               const notif = getOrderNotificationContact(order, customer);
               if (notif.email) {
-                const pdfUrl = getPublicSalesOrderPdfUrl(order.leadId);
+                const pdfUrl = await getPublicSalesOrderPdfUrl(order.leadId);
                 await sendSalesOrderReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
               }
             }
@@ -1485,7 +1497,7 @@ export const processPayment = async (req, res) => {
                 await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
                 const notif = getOrderNotificationContact(order, customer);
                 if (notif.email) {
-                  const pdfUrl = getPublicQuotePdfUrl(order.leadId);
+                  const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
                   await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
                 }
               }
