@@ -542,7 +542,7 @@ export const updateOrder = async (req, res) => {
 
     const { leadId } = req.params;
     const customerId = req.user.userId;
-    const { items, deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, accNumber, utrNum } = req.body;
+    const { items, deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, accNumber, utrNum, paidAmount } = req.body;
 
     let order;
     if(accNumber) {
@@ -596,7 +596,8 @@ export const updateOrder = async (req, res) => {
     order.customerPaymentDetails = {
       ...order.customerPaymentDetails,
       ...(utrNum && { utrNum }),
-      ...(accNumber && { accNum: accNumber })
+      ...(accNumber && { accNum: accNumber }),
+      ...(paidAmount && { paidAmount: paidAmount })
     };
     await order.save();
 

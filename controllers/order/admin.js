@@ -840,13 +840,13 @@ export const updateOrderStatus = async (req, res) => {
       (async () => {
         try {
           const customer = await User.findById(order.custUserId);
-          if (customer?.email) {
-            await sendOrderAcceptedEmail(
-              getOrderNotificationContact(order, customer).email || customer.email,
-              getOrderNotificationContact(order, customer).name || customer.name || 'Customer',
-              { leadId: order.leadId, formattedLeadId: order.formattedLeadId }
-            ).catch(() => {});
-          }
+          // if (customer?.email) {
+          //   await sendOrderAcceptedEmail(
+          //     getOrderNotificationContact(order, customer).email || customer.email,
+          //     getOrderNotificationContact(order, customer).name || customer.name || 'Customer',
+          //     { leadId: order.leadId, formattedLeadId: order.formattedLeadId }
+          //   ).catch(() => {});
+          // }
           // Create Quote in Zoho as soon as order is accepted – then send quote email (so customer gets it without downloading PDF)
           if (!order.zohoQuoteId && customer) {
             try {

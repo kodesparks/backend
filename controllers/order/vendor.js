@@ -158,13 +158,13 @@ export const acceptOrder = async (req, res) => {
     (async () => {
       try {
         const customer = await User.findById(order.custUserId).select('email name').lean();
-        if (customer?.email) {
-          await sendOrderAcceptedEmail(
-            customer.email,
-            customer.name || 'Customer',
-            { leadId: order.leadId, formattedLeadId: order.formattedLeadId }
-          ).catch(() => {});
-        }
+        // if (customer?.email) {
+        //   await sendOrderAcceptedEmail(
+        //     customer.email,
+        //     customer.name || 'Customer',
+        //     { leadId: order.leadId, formattedLeadId: order.formattedLeadId }
+        //   ).catch(() => {});
+        // }
       } catch (err) {
         console.warn('⚠️ Order-accepted email failed:', err?.message || err);
       }

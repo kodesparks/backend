@@ -354,6 +354,16 @@ class ZohoBooksService {
     return this._truncateAddressForZoho(fromOrder);
   }
 
+  _getBillingAddress(addr) {
+    if (!addr || typeof addr !== 'object') return addr;
+    const addrMax = 99;
+    const out = { ...addr, country: addr.country || 'India' };
+    if (out.address && out.address.length > addrMax) out.address = out.address.substring(0, addrMax);
+    if (out.city && out.city.length > addrMax) out.city = out.city.substring(0, addrMax);
+    if (out.state && out.state.length > addrMax) out.state = out.state.substring(0, addrMax);
+    if (out.zip && out.zip.length > 20) out.zip = out.zip.substring(0, 20);
+    return out;
+  }
   /**
    * Sanitize name for Zoho: alphanumeric and spaces only, max length.
    */
@@ -631,7 +641,10 @@ class ZohoBooksService {
       if (!deliveryAddr) {
         console.warn(`⚠️  Sales Order will use Zoho contact address: order has no valid delivery address. Ensure place order API was called with deliveryAddress.`);
       }
-
+      const totalLoadingCharges = order.items.reduce(
+        (sum, item) => sum + (item.loadingCharges || 0),
+        0
+      );
       // Build Sales Order payload
       // DO NOT send salesorder_number - let Zoho auto-generate it
       // Build Sales Order payload (Zoho Sales Order API)
@@ -642,13 +655,16 @@ class ZohoBooksService {
         date: new Date().toISOString().split('T')[0],
         reference_number: order.leadId || '',
         line_items: lineItems,
-        is_inclusive_tax: false
+        is_inclusive_tax: false,
       };
       
-      // Add shipping charge if present
-      if (order.deliveryCharges && order.deliveryCharges > 0) {
-        salesOrderData.shipping_charge = String(order.deliveryCharges.toFixed(2));
+      if (totalLoadingCharges && totalLoadingCharges > 0) {
+        salesOrderData.shipping_charge = String(totalLoadingCharges.toFixed(2));
       }
+      // Add shipping charge if present
+      // if (order.deliveryCharges && order.deliveryCharges > 0) {
+      //   salesOrderData.shipping_charge = String(totalLoadingCharges.toFixed(2));
+      // }
       
       // Do NOT send billing_address/shipping_address on create – Zoho rejects with
       // "billing_address has less than 100 characters" (they validate the whole block).
@@ -688,7 +704,7 @@ class ZohoBooksService {
           if (order.deliveryPincode) updateData.cf_delivery_pincode = order.deliveryPincode;
           if (order.deliveryExpectedDate) updateData.cf_delivery_expected_date = new Date(order.deliveryExpectedDate).toISOString().split('T')[0];
           if (order.totalQty) updateData.cf_total_quantity = order.totalQty;
-          if (order.deliveryCharges) updateData.cf_delivery_charges = order.deliveryCharges;
+          if (order.deliveryCharges) updateData.cf_delivery_charges = totalLoadingCharges;
           
           if (Object.keys(updateData).length > 0) {
             // Sales Orders API expects data WITHOUT { salesorder: {...} } wrapper
@@ -703,8 +719,9 @@ class ZohoBooksService {
         // Set document-level billing/shipping (use same strict truncation as create)
         if (deliveryAddr) {
           const safeAddr = this._truncateAddressForSalesOrderCreate(deliveryAddr);
+          const billAddr = this._getBillingAddress({address: customer.address});
           try {
-            await this.makeRequest('PUT', `salesorders/${response.salesorder.salesorder_id}/address/billing`, safeAddr);
+            await this.makeRequest('PUT', `salesorders/${response.salesorder.salesorder_id}/address/billing`, billAddr);
             await this.makeRequest('PUT', `salesorders/${response.salesorder.salesorder_id}/address/shipping`, safeAddr);
             console.log(`✅ Sales Order billing/shipping address set on document`);
           } catch (addrError) {
@@ -874,10 +891,15 @@ class ZohoBooksService {
       if (zohoCustomerId) {
         invoiceData.customer_id = zohoCustomerId;
       }
+
+      const totalLoadingCharges = order.items.reduce(
+        (sum, item) => sum + (item.loadingCharges || 0),
+        0
+      );
       
       // Add shipping charge if present
-      if (order.deliveryCharges && order.deliveryCharges > 0) {
-        invoiceData.shipping_charge = String(order.deliveryCharges.toFixed(2));
+      if (totalLoadingCharges && totalLoadingCharges > 0) {
+        invoiceData.shipping_charge = String(totalLoadingCharges.toFixed(2));
       }
       
       // Do NOT send billing_address/shipping_address on create – Zoho returns same error as Sales Order:
@@ -898,7 +920,7 @@ class ZohoBooksService {
           if (order.deliveryPincode) updateData.cf_delivery_pincode = order.deliveryPincode;
           if (order.deliveryExpectedDate) updateData.cf_delivery_expected_date = new Date(order.deliveryExpectedDate).toISOString().split('T')[0];
           if (order.totalQty) updateData.cf_total_quantity = order.totalQty;
-          if (order.deliveryCharges) updateData.cf_delivery_charges = order.deliveryCharges;
+          if (order.deliveryCharges) updateData.cf_delivery_charges = totalLoadingCharges;
           
           if (Object.keys(updateData).length > 0) {
             // Invoices API expects data WITHOUT { invoice: {...} } wrapper
@@ -913,8 +935,9 @@ class ZohoBooksService {
         // Set document-level billing/shipping so PDF shows order delivery address (strict truncation for Zoho 100-char limit)
         if (deliveryAddr) {
           const safeAddr = this._truncateAddressForSalesOrderCreate(deliveryAddr);
+          const billAddr = this._getBillingAddress({address: customer.address});
           try {
-            await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}/address/billing`, safeAddr);
+            await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}/address/billing`, billAddr);
             await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}/address/shipping`, safeAddr);
             console.log(`✅ Invoice billing/shipping address set on document`);
           } catch (addrError) {
@@ -1609,14 +1632,15 @@ class ZohoBooksService {
       };
  
       // Add shipping charge if present
-      if (order.deliveryCharges && order.deliveryCharges > 0) {
+      if (totalLoadingCharges && totalLoadingCharges > 0) {
         quoteData.shipping_charge = String(totalLoadingCharges.toFixed(2));
       }
       
       // Add billing and shipping addresses (full address from order)
       if (deliveryAddr) {
         const safeAddr = this._truncateAddressForZoho(deliveryAddr);
-        quoteData.billing_address = safeAddr;
+        const billAddr = this._getBillingAddress({address: customer.address});
+        quoteData.billing_address = billAddr;
         quoteData.shipping_address = safeAddr;
       }
 
@@ -1649,8 +1673,9 @@ class ZohoBooksService {
         // billing and shipping address so the quote PDF shows the order delivery address.
         if (deliveryAddr) {
           const safeAddr = this._truncateAddressForZoho(deliveryAddr);
+          const billAddr = this._getBillingAddress({address: customer.address});
           try {
-            await this.makeRequest('PUT', `estimates/${response.estimate.estimate_id}/address/billing`, safeAddr);
+            await this.makeRequest('PUT', `estimates/${response.estimate.estimate_id}/address/billing`, billAddr);
             await this.makeRequest('PUT', `estimates/${response.estimate.estimate_id}/address/shipping`, safeAddr);
             console.log(`✅ Quote billing/shipping address set on document (order delivery address)`);
           } catch (addrError) {

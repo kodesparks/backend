@@ -133,7 +133,11 @@ const updateOrderValidation = [
   body('accNumber')
     .optional()
     .matches(/^[0-9]{9,18}$/)
-    .withMessage('Valid account number is required')
+    .withMessage('Valid account number is required'),
+  body('paidAmount')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Paid amount must be a valid number greater than or equal to 0')
 ];
 
 const placeOrderValidation = [

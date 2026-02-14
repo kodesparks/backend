@@ -23,6 +23,12 @@ const orderSchema = new mongoose.Schema({
     accNum: {
       type: String,
       trim: true
+    },
+    paidAmount: {
+      type: Number,
+      required: false,
+      default: 0,
+      min: 0
     }
   },
   // Order Items (Multiple items from same vendor)
