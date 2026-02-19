@@ -153,6 +153,58 @@ export const getAllInventory = async (req, res, next) => {
   }
 };
 
+//Get All Inventory without pagination
+export const getAllInventoryWOPagination = async (req, res, next) => {
+  try {
+    const { 
+      category, 
+      subCategory, 
+      vendorId, 
+      search,
+      isActive 
+    } = req.query;
+
+    const filter = {};
+    
+    // Only filter by isActive if explicitly provided
+    if (isActive !== undefined && isActive !== null) {
+      filter.isActive = isActive === 'true';
+    }
+
+    // Apply filters based on user role
+    if (req.user.role === 'vendor') {
+      filter.vendorId = req.user._id;
+    } else if (vendorId) {
+      filter.vendorId = vendorId;
+    }
+
+    if (category) filter.category = category;
+    if (subCategory) filter.subCategory = subCategory;
+
+    if (search) {
+      filter.$or = [
+        { itemDescription: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } },
+        { subCategory: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const inventory = await Inventory.find(filter)
+      .populate('vendorId', 'name email role')
+      .populate('createdBy', 'name email role')
+      .select('itemDescription category subCategory grade units details specification pricing warehouses vendorId createdBy isActive itemCode images primaryImage shipping warehouse createdDate timestamp updateDate updateTime createdAt updatedAt __v formattedItemCode zohoItemId id')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      count: inventory.length,
+      inventory
+    });
+
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Get Inventory Item by ID
 export const getInventoryById = async (req, res, next) => {
   try {

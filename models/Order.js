@@ -218,7 +218,10 @@ const orderSchema = new mongoose.Schema({
     type: String,
     default: null
   },
-  
+  zohoPaymentId: {
+    type: String,
+    default: null
+  },
   // Timestamps
   orderDate: {
     type: Date,

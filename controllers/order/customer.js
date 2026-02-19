@@ -225,8 +225,24 @@ export const addToCart = async (req, res) => {
       });
     }
 
-    const { itemCode, qty, deliveryPincode } = req.body;
-    const customerId = req.user.userId;
+    const { itemCode, qty, deliveryPincode, customerContact } = req.body;
+    let customerId;
+    let isAdmin = false;
+    if(req.user.role === 'admin') {
+      isAdmin = true;
+      const user = await User.findOne({
+        phone: customerContact
+      });
+      if (!user) {
+        const error = new Error("Customer not found with this phone number");
+        error.status = 404;
+        throw error;
+      }
+      customerId = user.id;
+    } else {
+      customerId = req.user.userId;
+    }
+    console.log(customerId);
 
     // 1️⃣ Get inventory item
     const inventoryItem = await Inventory.findById(itemCode);
@@ -300,7 +316,7 @@ export const addToCart = async (req, res) => {
     const itemTotalCost = qty * itemUnitPrice;
 
     // 4️⃣ If order exists → update it
-    if (order) {
+    if (order && !isAdmin) {
       const itemIndex = order.items.findIndex(
         (i) => i.itemCode.toString() === itemCode
       );
@@ -325,16 +341,20 @@ export const addToCart = async (req, res) => {
       order.totalAmount = itemsTotal + deliveryCharges;
 
       await order.save();
+      if(isAdmin) {
+        placeOrder(req, res);
+      } else {
+        await order.populate([
+          { path: 'items.itemCode', select: 'itemDescription category subCategory primaryImage' },
+          { path: 'vendorId', select: 'name email phone' }
+        ]);
 
-      await order.populate([
-        { path: 'items.itemCode', select: 'itemDescription category subCategory primaryImage' },
-        { path: 'vendorId', select: 'name email phone' }
-      ]);
-
-      return res.status(200).json({
-        message: 'Item added to existing cart',
-        order
-      });
+        return res.status(200).json({
+          message: 'Item added to existing cart',
+          order
+        });
+      }
+      
     }
 
     // 5️⃣ Else → create new order
@@ -360,8 +380,8 @@ export const addToCart = async (req, res) => {
       deliveryExpectedDate:
         req.body.deliveryExpectedDate ||
         new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      custPhoneNum: req.body.custPhoneNum || req.user.phone,
-      receiverMobileNum: req.body.receiverMobileNum || req.user.phone,
+      custPhoneNum: isAdmin ? customerContact : req.body.custPhoneNum || req.user.phone,
+      receiverMobileNum: isAdmin ? req.body.receiverPhoneNumber : req.body.receiverMobileNum || req.user.phone,
       orderStatus: 'pending',
       isActive: true
     });
@@ -971,6 +991,26 @@ export const getPublicSalesOrderPDF = async (req, res) => {
   }
 };
 
+/** Public Payment PDF (no login). Used by link in payment receipt email. */
+export const getPublicPaymentPDF = async (req, res) => {
+  try {
+    const token = req.query.token;
+    if (!token) return res.status(400).json({ message: 'Missing token' });
+    // const payload = verifyInvoicePdfToken(token);
+    const payload = await validateToken(token, "payment");
+    if (!payload?.docId) return res.status(403).json({ message: 'Invalid or expired link' });
+    const order = await Order.findOne({ leadId: payload.docId, isActive: true, zohoPaymentId: { $exists: true, $ne: null } });
+    if (!order?.zohoPaymentId) return res.status(404).json({ message: 'payment not found or not ready yet' });
+    const pdfBuffer = await zohoBooksService.getPaymentPDF(order.zohoPaymentId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="payment-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Public payment PDF error:', error);
+    res.status(500).json({ message: 'Failed to load payment PDF', error: error.message });
+  }
+};
+
 /** Public Invoice PDF (no login). Used by link in invoice-ready email. */
 export const getPublicInvoicePDF = async (req, res) => {
   try {
@@ -1014,8 +1054,15 @@ export async function getPublicInvoicePdfUrl(leadId) {
   const base = (process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
   // const token = generateInvoicePdfToken(leadId);
   const token = await createDocumentToken('invoice', leadId);
-  console.log('token created for so');
   return token ? `${base}/api/order/invoice-pdf?token=${token}` : null;
+}
+
+/** Build public Invoice PDF URL for email. */
+export async function getPublicPaymentPdfUrl(leadId) {
+  const base = (process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
+  // const token = generateInvoicePdfToken(leadId);
+  const token = await createDocumentToken('payment', leadId);
+  return token ? `${base}/api/order/payment-receipt-pdf?token=${token}` : null;
 }
 
 // Download Purchase Order PDF (only when vendor assigned and PO created in Zoho)

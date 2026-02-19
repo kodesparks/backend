@@ -5,8 +5,8 @@ import OrderPayment from '../../models/OrderPayment.js';
 import User from '../../models/User.js';
 import mongoose from 'mongoose';
 import zohoBooksService from '../../utils/zohoBooks.js';
-import { sendOrderAcceptedEmail, sendQuoteReadyEmail, sendSalesOrderReadyEmail, sendInvoiceReadyEmail } from '../../utils/emailService.js';
-import { getPublicQuotePdfUrl, getPublicSalesOrderPdfUrl, getPublicInvoicePdfUrl, getOrderNotificationContact } from './customer.js';
+import { sendOrderAcceptedEmail, sendQuoteReadyEmail, sendSalesOrderReadyEmail, sendInvoiceReadyEmail, sendPaymentReceiptEmail } from '../../utils/emailService.js';
+import { getPublicQuotePdfUrl, getPublicSalesOrderPdfUrl, getPublicInvoicePdfUrl, getOrderNotificationContact, getPublicPaymentPdfUrl } from './customer.js';
 
 // Get all orders (Admin)
 export const getAllOrders = async (req, res) => {
@@ -304,7 +304,7 @@ export const cancelOrder = async (req, res) => {
   try {
     const { leadId } = req.params;
     const adminId = req.user.userId;
-    const { reason = '' } = req.body || {};
+    const { reason } = req.body || {};
 
     const order = await Order.findOne({
       leadId,
@@ -333,7 +333,7 @@ export const cancelOrder = async (req, res) => {
       order.vendorId,
       'cancelled',
       adminId,
-      reason || 'Order cancelled by admin'
+      reason?.reason || 'Order cancelled by admin'
     );
 
     res.status(200).json({
@@ -497,7 +497,7 @@ export const markPaymentDone = async (req, res) => {
 
     // Create or update payment record
     let payment = await OrderPayment.findOne({ invcNum: order.invcNum });
-    
+    const customer = await User.findById(order.custUserId);
     if (payment) {
       // Update existing payment
       payment.paidAmount = paidAmount;
@@ -510,7 +510,26 @@ export const markPaymentDone = async (req, res) => {
         payment.utrNum = transactionId; // Store as UTR for bank transfers
       }
       payment.paymentDate = paymentDate;
+
+      const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer);
+
       await payment.save();
+      if (createPayReciept?.payment_id) {
+        order.zohoPaymentId = createPayReciept.payment_id;
+        await order.save();
+        console.log(`✅ Zoho Payment created: ${createPayReciept.payment_id} for order ${order.leadId}`);
+        if (customer?.zohoCustomerId) {
+          await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => { });
+        }
+        // await zohoBooksService.emailInvoice(zohoInvoice.invoice_id).catch((err) => {
+        //   console.warn(`⚠️ Invoice email (Zoho) failed for order ${currentOrder.leadId}:`, err?.message || err);
+        // });
+        const notifInv = getOrderNotificationContact(order, customer);
+        if (notifInv.email) {
+          const pdfUrl = await getPublicPaymentPdfUrl(order.leadId);
+          await sendPaymentReceiptEmail(notifInv.email, notifInv.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => { });
+        }
+      }
     } else {
       // Create new payment record
       const paymentData = {
@@ -531,8 +550,22 @@ export const markPaymentDone = async (req, res) => {
       }
 
       payment = await OrderPayment.create(paymentData);
+      const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer);
+      await payment.save();
+      if (createPayReciept?.payment_id) {
+        order.zohoPaymentId = createPayReciept.payment_id;
+        await order.save();
+        console.log(`✅ Zoho Payment created: ${createPayReciept.payment_id} for order ${order.leadId}`);
+        if (customer?.zohoCustomerId) {
+          await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => { });
+        }
+        const notifInv = getOrderNotificationContact(order, customer);
+        if (notifInv.email) {
+          const pdfUrl = await getPublicPaymentPdfUrl(order.leadId);
+          await sendPaymentReceiptEmail(notifInv.email, notifInv.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => { });
+        }
+      }
     }
-
     // Update order status to payment_done
     await order.updateStatus('payment_done');
 

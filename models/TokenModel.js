@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const TokenSchema = new mongoose.Schema({
   token: { type: String, required: true, unique: true },
-  docType: { type: String, enum: ["quote", "so", "invoice"], required: true },
+  docType: { type: String, enum: ["quote", "so", "invoice", "payment"], required: true },
   docId: { type: String, required: true },
   expiresAt: { type: Date, required: true },
   isUsed: { type: Boolean, default: false }

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
 import OrderDelivery from '../models/OrderDelivery.js';
+import getStateCode from './getStateCodes.js'
 
 // Load environment variables
 dotenv.config();
@@ -203,7 +204,8 @@ class ZohoBooksService {
       const purchaseOrderData = {
         vendor_id: zohoVendorId,
         date: new Date().toISOString().split('T')[0],
-        line_items: lineItems
+        line_items: lineItems,
+        // place_of_supply: order.deliveryState ? getStateCode(order.deliveryState) : ''
       };
       
       // Try adding vendor_name as well (some Zoho configurations might need both)
@@ -657,6 +659,7 @@ class ZohoBooksService {
         reference_number: order.leadId || '',
         line_items: lineItems,
         is_inclusive_tax: false,
+        // place_of_supply: order.deliveryState ? getStateCode(order.deliveryState) : ''
       };
 
       if (totalLoadingCharges && totalLoadingCharges > 0) {
@@ -889,6 +892,7 @@ class ZohoBooksService {
         reference_number: order.leadId || '',
         line_items: lineItems,
         is_inclusive_tax: false,
+        // place_of_supply: order.deliveryState ? getStateCode(order.deliveryState) : '',
         custom_fields: [
           {
             label: "Delivery Pincode",
@@ -925,7 +929,6 @@ class ZohoBooksService {
       // IMPORTANT: Invoices API expects data WITHOUT { invoice: {...} } wrapper (like Estimates and Sales Orders)
       console.log('📤 Creating Invoice in Zoho:', JSON.stringify(invoiceData, null, 2));
       const response = await this.makeRequest('POST', 'invoices', invoiceData);
-      
       // Update with custom fields after creation
       if (response.invoice?.invoice_id) {
         try {
@@ -943,19 +946,7 @@ class ZohoBooksService {
             await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}`, updateData);
             console.log(`✅ Invoice updated with custom fields`);
           }
-          // console.log('createPaymentRecipt');
-          // const createPayRes = this.createPaymentReceipt(response.invoice?.invoice_id, {
-                
-          //   customer_id: customer.id || '',
-          //   invoice_id: response.invoice?.invoice_id,
-          //   payment_mode: 'cash', // cash, bank_transfer, online, etc.
-          //   amount: order.totalAmount,
-          //   date: new Date().toISOString().split('T')[0],
-          //   reference_number: '',
-          //   description: 'Payment received'
-          
-          // });
-          // console.log('createPayRes',createPayRes);
+        
         } catch (updateError) {
           console.warn(`⚠️  Failed to update Invoice with custom fields:`, updateError.message);
           // Don't fail - invoice was created successfully
@@ -986,7 +977,7 @@ class ZohoBooksService {
         })();
       }
       
-      console.log(`✅ Invoice created in Zoho Books: ${response.invoice?.invoice_id}`);
+      console.log(`✅ Invoice created in Zoho Books: ${JSON.stringify(response.invoice)}`);
       return response.invoice;
     } catch (error) {
       console.error('❌ Failed to create Invoice in Zoho Books:', error.response?.data || error.message);
@@ -1551,6 +1542,34 @@ class ZohoBooksService {
     }
   }
 
+  async getInvoiceById(invoiceId) {
+    try {
+      const response1 = await this.makeRequest('GET', `invoices`);
+      console.log(';;;', response1)
+      const token = await this.getAccessToken();
+      const url = `${this.baseURL}/invoices/3422894000000186001`;
+
+      const response = await axios.get(url, {
+        params: {
+          organization_id: this.organizationId
+        },
+        headers: {
+          'Authorization': `Zoho-oauthtoken ${token}`
+        }
+      });
+
+      // Zoho wraps actual data inside response.data.invoice
+      return response.data?.invoice;
+
+    } catch (error) {
+      console.error(
+        '❌ Failed to get Invoice:',
+        error.response?.data || error.message
+      );
+      // throw error;
+    }
+  }
+
   /**
    * Get Invoice PDF
    * @param {string} invoiceId - Zoho Invoice ID
@@ -1575,6 +1594,34 @@ class ZohoBooksService {
       return Buffer.from(response.data);
     } catch (error) {
       console.error(`❌ Failed to get Invoice PDF:`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+   /**
+   * Get Payemnt PDF
+   * @param {string} paymentId - Zoho Payment ID
+   * @returns {Promise<Buffer>} PDF buffer
+   */
+  async getPaymentPDF(paymentId) {
+    try {
+      const token = await this.getAccessToken();
+      const url = `${this.baseURL}/customerpayments/${paymentId}`;
+      
+      const response = await axios.get(url, {
+        params: {
+          organization_id: this.organizationId,
+          accept: 'pdf'
+        },
+        headers: {
+          'Authorization': `Zoho-oauthtoken ${token}`
+        },
+        responseType: 'arraybuffer'
+      });
+
+      return Buffer.from(response.data);
+    } catch (error) {
+      console.error(`❌ Failed to get payment PDF:`, error.response?.data || error.message);
       throw error;
     }
   }
@@ -1658,7 +1705,8 @@ class ZohoBooksService {
         reference_number: order.leadId || '',
         line_items: lineItems,
         is_inclusive_tax: false,
-        shipping_charge_tax_id: "3422894000000075399"
+        shipping_charge_tax_id: "3422894000000075399",
+        // place_of_supply: order.deliveryState ? getStateCode(order.deliveryState) : ''
       };
  
       // Add shipping charge if present
@@ -1728,27 +1776,44 @@ class ZohoBooksService {
    * Called when: Payment is completed
    * Step 3: Payment completed → Generate payment receipt
    */
-  async createPaymentReceipt(invoiceId, paymentData) {
+  async createPaymentReceipt(paymentData, customer) {
     try {
+      let zohoCustomerId = null;
+      if (customer) {
+        try {
+          zohoCustomerId = await this.createOrGetCustomer(customer);
+          if (zohoCustomerId && !customer.zohoCustomerId) {
+            customer.zohoCustomerId = zohoCustomerId;
+            await customer.save();
+          }
+        } catch (error) {
+          console.error(`⚠️  Customer creation failed:`, error.message);
+          throw new Error(`Cannot create payment recipt: Customer must be created in Zoho first. Error: ${error.message}`);
+        }
+      }
+      if (!zohoCustomerId) {
+        throw new Error('Customer ID is required for payment receipt creation. Please create customer in Zoho first.');
+      }
+      console.log(paymentData);
       // paymentData should contain: amount, payment_mode, date, reference_number, etc.
       const receiptData = {
-        customer_id: paymentData.customerId,
-        invoice_id: invoiceId,
+        customer_id: zohoCustomerId,
         payment_mode: paymentData.paymentMode || 'cash', // cash, bank_transfer, online, etc.
-        amount: paymentData.amount,
+        amount: paymentData.paidAmount,
         date: paymentData.date || new Date().toISOString().split('T')[0],
         reference_number: paymentData.referenceNumber || paymentData.utr || '',
-        description: paymentData.description || 'Payment received'
+        description: paymentData.description || 'Payment received',
+        
       };
 
       console.log('📤 Creating Payment Receipt in Zoho:', JSON.stringify({ payment: receiptData }, null, 2));
-      const response = await this.makeRequest('POST', 'customerpayments', { payment: receiptData });
+      const response = await this.makeRequest('POST', 'customerpayments', receiptData);
       
       console.log(`✅ Payment Receipt created in Zoho Books: ${response.payment?.payment_id}`);
       return response.payment;
     } catch (error) {
       console.error('❌ Failed to create Payment Receipt in Zoho Books:', error.response?.data || error.message);
-      throw error;
+      throw error.response;
     }
   }
 

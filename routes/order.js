@@ -22,7 +22,8 @@ import {
   getPublicInvoicePDF,
   downloadPurchaseOrderPDF,
   downloadSalesOrderPDF,
-  downloadInvoicePDF
+  downloadInvoicePDF,
+  getPublicPaymentPDF
 } from '../controllers/order/customer.js';
 
 import {
@@ -213,6 +214,7 @@ const leadIdValidation = [
 router.get('/quote-pdf', getPublicQuotePDF);
 router.get('/sales-order-pdf', getPublicSalesOrderPDF);
 router.get('/invoice-pdf', getPublicInvoicePDF);
+router.get('/payment-receipt-pdf', getPublicPaymentPDF);
 
 // Add item to cart (Create order)
 router.post('/cart/add', 

@@ -12,6 +12,7 @@ import {
   updateInventory,
   deleteInventory,
   updateInventoryPricing,
+  getAllInventoryWOPagination,
   // ✅ REMOVED: createInventoryPrice, getInventoryPrices, createInventoryShipPrice, getShippingPrice
   // ✅ REMOVED: getSingleItemPrice, getSingleItemShipping - Using direct model approach
   createPromo,
@@ -145,6 +146,16 @@ router.get('/',
   getAllInventory
 );
 
+// Get All Invenory WO Pagination
+router.get('/wopagination',
+  authenticateToken,
+  [
+    check('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+    check('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100')
+  ],
+  validate,
+  getAllInventoryWOPagination
+);
 // Get Inventory Item by ID (All authenticated users)
 router.get('/:id',
   authenticateToken,

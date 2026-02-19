@@ -130,7 +130,7 @@ export async function sendOrderPlacedEmail(to, name, orderDetails) {
     <p><strong>Order ID:</strong> ${formattedLeadId || leadId || '–'}</p>
     ${itemCount ? `<p><strong>Items:</strong> ${itemCount}</p>` : ''}
     ${deliveryAddress ? `<p><strong>Delivery address:</strong> ${deliveryAddress}</p>` : ''}
-    <p>You will receive a quote from the vendor shortly. You can also download the quote from your order page.</p>
+    <p>You will receive a quote from the infraxpert shortly. You can also download the quote from your order page.</p>
     <p>Thank you for your order.</p>
   `;
   try {
@@ -267,3 +267,49 @@ export async function sendInvoiceReadyEmail(to, name, leadId, formattedLeadId, p
     return false;
   }
 }
+
+/**
+ * Send "Payment Receipt" email from our SMTP
+ * Includes receipt PDF URL when available
+ */
+export async function sendPaymentReceiptEmail(
+  to,
+  name,
+  leadId,
+  formattedLeadId,
+  receiptUrl = null
+) {
+  console.log('sending mail...')
+  const trans = getTransporter();
+  if (!trans || !to || !String(to).trim()) return false;
+
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER;
+  const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/$/, '');
+  const orderUrl = frontendUrl ? `${frontendUrl}/orders` : 'your account';
+
+  const subject = `Payment Receipt – ${formattedLeadId || leadId || 'Order'}`;
+
+  const html = 
+    `<p>Hi ${name || 'Customer'},</p>
+    <p>We have successfully received your payment for order <strong>${formattedLeadId || leadId || '–'}</strong></p>
+    ${receiptUrl ? `<p><a href="${receiptUrl}" style="color:#2563eb; font-weight:bold;">View Payment Receipt</a></p>` : ''}
+    <p>You can also log in to your account to view details.</p>
+    ${orderUrl !== 'your account' ? `<p><a href="${orderUrl}" style="color:#2563eb;">View my orders</a></p>` : ''}
+    <p>Thank you.</p>
+  `;
+  try {
+    await trans.sendMail({ from, to, subject, html });
+    console.log('mail sent')
+    console.log(
+      `✅ Payment receipt email sent to ${to} for order ${
+        leadId || '–'
+      }${receiptUrl ? ' (Receipt URL included)' : ''}`
+    );
+
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to send payment receipt email:', err.message);
+    return false;
+  }
+}
+
