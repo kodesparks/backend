@@ -29,7 +29,7 @@ const orderDeliverySchema = new mongoose.Schema({
   },
   address: {
     type: String,
-    required: true
+    default: ''
   },
   pincode: {
     type: String,

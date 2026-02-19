@@ -142,26 +142,26 @@ const updateOrderValidation = [
 ];
 
 const placeOrderValidation = [
-  body('deliveryAddress')
-    .isString()
-    .withMessage('Delivery address is required'),
+  // body('deliveryAddress')
+  //   .isString()
+  //   .withMessage('Delivery address is required'),
   body('deliveryPincode')
     .matches(/^[1-9][0-9]{5}$/)
     .withMessage('Valid pincode is required'),
   body('deliveryExpectedDate')
     .isISO8601()
     .withMessage('Valid delivery date is required'),
-  body('receiverMobileNum')
-    .matches(/^[6-9]\d{9}$/)
-    .withMessage('Valid receiver mobile number is required'),
-  body('email')
-    .optional()
-    .isEmail()
-    .withMessage('Valid email when provided'),
-  body('receiverName')
-    .optional()
-    .isString()
-    .withMessage('Receiver name must be a string'),
+  // body('receiverMobileNum')
+  //   .matches(/^[6-9]\d{9}$/)
+  //   .withMessage('Valid receiver mobile number is required'),
+  // body('email')
+  //   .optional()
+  //   .isEmail()
+  //   .withMessage('Valid email when provided'),
+  // body('receiverName')
+  //   .optional()
+  //   .isString()
+  //   .withMessage('Receiver name must be a string'),
   body('city')
     .optional()
     .isString(),
