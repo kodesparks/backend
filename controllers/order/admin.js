@@ -1218,6 +1218,11 @@ export const updateDelivery = async (req, res) => {
       courierService,
       expectedDeliveryDate,
       remarks,
+      // ✅ Receiver Info (NEW)
+      receiverName,
+      receiverPhone,
+      receiverEmail,
+      receiverAddress,
       // new fleet fields
       driverName, driverPhone, driverLicenseNo, truckNumber, vehicleType,
       capacityTons, startTime, estimatedArrival, lastLocation, deliveryNotes
@@ -1231,12 +1236,25 @@ export const updateDelivery = async (req, res) => {
       });
     }
 
+    if (receiverAddress) order.deliveryAddress = receiverAddress;
+    if (receiverPhone) order.receiverMobileNum = receiverPhone;
+    if (receiverEmail) order.orderEmail = receiverEmail;
+    if (receiverName) order.orderReceiverName = receiverName;
+    // || (payloadReceiverName && String(payloadReceiverName).trim()) || profile?.name || null;
+    await order.save();
+
     let delivery = await OrderDelivery.findByOrder(leadId);
 
     if (!delivery) {
       // Create new delivery record (userId required by schema – use customer for order link)
       delivery = await OrderDelivery.create({
         leadId,
+        // ✅ Receiver Data (priority → request → fallback order)
+        // receiverName: receiverName || order.customerName,
+        // receiverPhone: receiverPhone || order.customerPhone,
+        // receiverEmail: receiverEmail || order.customerEmail,
+        // address: receiverAddress || order.deliveryAddress || 'Address to be updated',
+        
         invcNum: order.invcNum,
         userId: order.custUserId,
         address: order.deliveryAddress || 'Address to be updated',
