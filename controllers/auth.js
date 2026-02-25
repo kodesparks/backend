@@ -434,7 +434,7 @@ const createUser = async (req, res, next) => {
     const { 
       name, phone, email, password, address, pincode, role,
       employeeId, aadharNumber, panCard, joiningDate, terminationDate, 
-      employeeType, companyName, warehouse 
+      employeeType, companyName, warehouse, gstNumber, state
     } = req.body;
     
     // Only admin can create users with specific roles
@@ -493,6 +493,8 @@ const createUser = async (req, res, next) => {
 
     if (role === 'vendor') {
       userData.companyName = companyName;
+      userData.gstNumber = gstNumber;
+      userData.state = state;
       // Add warehouse data if provided
       if (warehouse) {
         userData.warehouse = warehouse;
