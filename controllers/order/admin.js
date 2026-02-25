@@ -510,6 +510,7 @@ export const markPaymentDone = async (req, res) => {
         payment.utrNum = transactionId; // Store as UTR for bank transfers
       }
       payment.paymentDate = paymentDate;
+      payment.refNum = order.leadId || '';
 
       const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer);
 
@@ -540,7 +541,8 @@ export const markPaymentDone = async (req, res) => {
         orderAmount: order.totalAmount,
         paidAmount: paidAmount,
         paymentMethod: paymentMethod,
-        paymentDate: paymentDate
+        paymentDate: paymentDate,
+        refNum: order.leadId || ''
       };
 
       // Add transactionId if provided, otherwise let default generate
@@ -668,7 +670,12 @@ export const confirmOrder = async (req, res) => {
   try {
     const { leadId } = req.params;
     const adminId = req.user.userId;
-    const { remarks = '' } = req.body || {};
+    const { remarks = '', items
+      ,vendorId,
+      vendorPhone,
+      vendorEmail,
+      gstNumber
+     } = req.body || {};
 
     // Find the order
     const order = await Order.findOne({
@@ -689,6 +696,62 @@ export const confirmOrder = async (req, res) => {
       });
     }
 
+    for (const updatedItem of items) {
+        const orderItem = order.items.find(
+          i => i.itemCode.toString() === updatedItem.itemCode
+        );
+        if (!orderItem) {
+          return res.status(400).json({
+            message: `Invalid itemCode: ${updatedItem.itemCode}`
+          });
+        }
+        const unitPrice = Number(updatedItem.vendorUnitPrice);
+        const loadingCharges = Number(updatedItem.vendorLoadingCharges || 0);
+
+        if (!unitPrice || isNaN(unitPrice) || unitPrice <= 0) {
+          return res.status(400).json({
+            message: 'Valid unit price required for all items'
+          });
+        }
+
+        if (isNaN(loadingCharges) || loadingCharges < 0) {
+          return res.status(400).json({
+            message: 'Valid loading charges required'
+          });
+        }
+
+        orderItem.vendorUnitPrice = unitPrice;
+        orderItem.vendorLoadingCharges = loadingCharges;
+
+        orderItem.vendorTotalCost =
+          (orderItem.qty * unitPrice) + loadingCharges;
+      }
+
+
+      // Create PO in Zoho as soon as order is confirmed – then send PO email (so customer gets it without downloading PDF)
+          if (!order.zohoPurchaseOrderId) {
+            try {
+              const populatedOrder = await Order.findById(order._id)
+                .populate('items.itemCode', 'itemDescription category subCategory units pricing zohoItemId');
+              const zohoQuote = await zohoBooksService.createPurchaseOrder(populatedOrder, {vendorEmail, vendorId, vendorEmail, vendorName, gstNumber});
+              if (zohoQuote?.estimate_id) {
+                await Order.updateOne({ _id: order._id }, { $set: { zohoQuoteId: zohoQuote.estimate_id } });
+                console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId} (at vendor_accepted)`);
+                if (customer.zohoCustomerId) {
+                  await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
+                }
+                await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
+                const notif = getOrderNotificationContact(order, customer);
+                if (notif.email) {
+                  const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
+                  await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+                  console.log(`✅ Quote-ready email (with PDF) sent to order email for ${order.leadId}`);
+                }
+              }
+            } catch (quoteErr) {
+              console.warn(`⚠️ Quote creation at vendor_accepted failed for ${order.leadId}:`, quoteErr?.message || quoteErr);
+            }
+          }
     // Update order status to order_confirmed
     await order.updateStatus('order_confirmed');
 

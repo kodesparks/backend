@@ -2,6 +2,7 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import OrderDelivery from '../models/OrderDelivery.js';
 import getStateCode from './getStateCodes.js'
+import { getTaxId } from './utils.js';
 
 // Load environment variables
 dotenv.config();
@@ -163,7 +164,7 @@ class ZohoBooksService {
         
         const lineItem = {
           name: shortName, // Valid item name/description (required)
-          rate: item.unitPrice,
+          rate: item.vendorUnitPrice,
           quantity: item.qty
         };
         
@@ -207,7 +208,15 @@ class ZohoBooksService {
         line_items: lineItems,
         // place_of_supply: order.deliveryState ? getStateCode(order.deliveryState) : ''
       };
-      
+      const totalLoadingCharges = order.items.reduce(
+        (sum, item) => sum + (item.vendorLoadingCharges || 0),
+        0
+      );
+      if (totalLoadingCharges && totalLoadingCharges > 0) {
+        purchaseOrderData.shipping_charge = String(totalLoadingCharges.toFixed(2));        
+        purchaseOrderData.shipping_charge_tax_id = "3422894000000075399"
+      }
+
       // Try adding vendor_name as well (some Zoho configurations might need both)
       try {
         const vendorInfo = await this.makeRequest('GET', `contacts/${zohoVendorId}`, null);
@@ -1384,6 +1393,26 @@ class ZohoBooksService {
     console.log('✅ Zoho customer activated');
   }
 }
+/**
+     * Get Customer details from Zoho
+     */
+    async getCustomerDetails(customerId) {
+        try {
+            // const headers = await this.getHeaders();
+            const response = await this.makeRequest('GET', `contacts/${customerId}`, null);
+            
+            //     `${this.baseUrl}/contacts/${customerId}`,
+            //     {
+            //         headers,
+            //         params: { organization_id: this.organizationId }
+            //     }
+            // );
+            return response;
+        } catch (error) {
+            console.error('❌ Error fetching Customer:', error.response?.data || error.message);
+            throw error;
+        }
+    }
 
   /**
    * Create or get Customer in Zoho Books
@@ -1668,6 +1697,12 @@ class ZohoBooksService {
         throw new Error('Customer ID is required for Quote creation. Please create customer in Zoho first.');
       }
 
+      const zcustomer = await this.getCustomerDetails(zohoCustomerId);
+     
+      const customerState = zcustomer.billing_address?.state ||
+                zcustomer.place_of_supply ||
+                zcustomer.place_of_contact ||
+                '';
       // Build line items with real names and Zoho item_id when available (maintain inventory link)
       const lineItems = [];
       for (const orderItem of order.items) {
@@ -1679,9 +1714,11 @@ class ZohoBooksService {
         const realName = (inventoryItem?.itemDescription || inventoryItem?.name || 'Item').trim();
         const nameForZoho = realName.length ? realName.substring(0, 255) : 'Item';
         if (itemId) {
-          lineItems.push({ item_id: itemId, rate: orderItem.unitPrice, quantity: orderItem.qty, loadingCharges: orderItem.loadingCharges });
+          lineItems.push({ item_id: itemId, rate: orderItem.unitPrice, quantity: orderItem.qty, loadingCharges: orderItem.loadingCharges,
+                     tax_id: getTaxId(customerState) });
         } else {
-          lineItems.push({ name: nameForZoho, rate: orderItem.unitPrice, quantity: orderItem.qty, loadingCharges: orderItem.loadingCharges });
+          lineItems.push({ name: nameForZoho,
+             rate: orderItem.unitPrice, quantity: orderItem.qty, loadingCharges: orderItem.loadingCharges, tax_id: getTaxId(customerState) });
         }
       }
 
@@ -1705,8 +1742,10 @@ class ZohoBooksService {
         reference_number: order.leadId || '',
         line_items: lineItems,
         is_inclusive_tax: false,
-        shipping_charge_tax_id: "3422894000000075399",
-        // place_of_supply: order.deliveryState ? getStateCode(order.deliveryState) : ''
+        shipping_charge_tax_id: getTaxId(customerState),
+        // tax_id: '3422894000000075239' || getTaxId(getStateCode(order.deliveryState)),
+        // place_of_supply: customerState
+        
       };
  
       // Add shipping charge if present
@@ -1801,9 +1840,8 @@ class ZohoBooksService {
         payment_mode: paymentData.paymentMode || 'cash', // cash, bank_transfer, online, etc.
         amount: paymentData.paidAmount,
         date: paymentData.date || new Date().toISOString().split('T')[0],
-        reference_number: paymentData.referenceNumber || paymentData.utr || '',
-        description: paymentData.description || 'Payment received',
-        
+        reference_number: paymentData.refNum || paymentData.referenceNumber || paymentData.utr || '',
+        description: paymentData.description || 'Payment received',        
       };
 
       console.log('📤 Creating Payment Receipt in Zoho:', JSON.stringify({ payment: receiptData }, null, 2));

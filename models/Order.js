@@ -57,6 +57,21 @@ const orderSchema = new mongoose.Schema({
       type: Number,
       default: 0,
       min: 0
+    },
+    vendorUnitPrice: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    venodorTotalCost: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    unitLoadingCharges: {
+      type: Number,
+      default: 0,
+      min: 0
     }
   }],
   

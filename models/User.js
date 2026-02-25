@@ -45,9 +45,10 @@ const ROLE_ACCESS_LEVELS = {
       'vendor_portal'
     ],
     requiredFields: [
-      'name', 'employeeId', 'phone', 'email', 'address', 'pincode',
-      'aadharNumber', 'panCard', 'joiningDate', 
-      'employeeType', 'companyName'
+      'name', 'phone', 'email', 'address', 'pincode', 'gstNumber', 'state'
+      // 'employeeId', 
+      // 'aadharNumber', 'panCard', 'joiningDate', 
+      // 'employeeType', 'companyName'
     ]
   },
   customer: {
@@ -148,6 +149,18 @@ const userSchema = new mongoose.Schema(
     companyName: {
       type: String,
       trim: true,
+    },
+
+    gstNumber: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+
+    state: {
+      type: String,
+      trim: true,
+      default: ''
     },
     
     // Warehouse Information (for vendors)
