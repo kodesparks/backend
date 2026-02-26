@@ -798,7 +798,13 @@ export const updateOrderStatus = async (req, res) => {
       vehicleType,
       capacityTons,
       deliveryNotes,
-      items
+      items,
+      deliveryAddress,
+      deliveryState,
+      deliveryPincode,
+      email,
+      receiverMobileNum,
+      receiverName
     } = req.body || {};
 
     if (!orderStatus) {
@@ -889,6 +895,20 @@ export const updateOrderStatus = async (req, res) => {
       );
 
       order.totalAmount = itemsTotal;
+      //Shipping details from admin
+      const addressTrimmed = (deliveryAddress != null && String(deliveryAddress).trim()) ? String(deliveryAddress).trim() : '';
+      if (!addressTrimmed) {
+        return res.status(400).json({
+          message: 'Delivery address is required'
+        });
+      }
+      order.deliveryAddress = addressTrimmed;
+      order.deliveryPincode = deliveryPincode != null ? String(deliveryPincode).trim() : order.deliveryPincode;
+      if (deliveryState != null && String(deliveryState).trim()) order.deliveryState = String(deliveryState).trim();
+      order.receiverMobileNum = receiverMobileNum;
+      order.orderEmail = (email && String(email).trim()) || order.orderEmail;
+      order.orderReceiverName = (receiverName && String(receiverName).trim()) || order.orderReceiverName;
+          
     }
 
       await order.save();
@@ -1218,11 +1238,6 @@ export const updateDelivery = async (req, res) => {
       courierService,
       expectedDeliveryDate,
       remarks,
-      // ✅ Receiver Info (NEW)
-      receiverName,
-      receiverPhone,
-      receiverEmail,
-      receiverAddress,
       // new fleet fields
       driverName, driverPhone, driverLicenseNo, truckNumber, vehicleType,
       capacityTons, startTime, estimatedArrival, lastLocation, deliveryNotes
@@ -1235,13 +1250,6 @@ export const updateDelivery = async (req, res) => {
         message: 'Order not found'
       });
     }
-
-    if (receiverAddress) order.deliveryAddress = receiverAddress;
-    if (receiverPhone) order.receiverMobileNum = receiverPhone;
-    if (receiverEmail) order.orderEmail = receiverEmail;
-    if (receiverName) order.orderReceiverName = receiverName;
-    // || (payloadReceiverName && String(payloadReceiverName).trim()) || profile?.name || null;
-    await order.save();
 
     let delivery = await OrderDelivery.findByOrder(leadId);
 
