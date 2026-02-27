@@ -210,6 +210,32 @@ export async function sendQuoteReadyEmail(to, name, leadId, formattedLeadId, pdf
   }
 }
 
+export async function sendPOReadyEmail(to, name, leadId, formattedLeadId, pdfUrl = null) {
+  const trans = getTransporter();
+  if (!trans || !to || !String(to).trim()) {
+    return false;
+  }
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER;
+  const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/$/, '');
+  const orderUrl = frontendUrl ? `${frontendUrl}/orders` : 'your account';
+  const subject = `Purchase Order ready – ${formattedLeadId || leadId || 'Order'}`;
+  const html = `
+    <p>Hi ${name || 'Vendor'},</p>
+    <p>Your purchse order for order <strong>${formattedLeadId || leadId || '–'}</strong> is ready.</p>
+    ${pdfUrl ? `<p><a href="${pdfUrl}" style="color:#2563eb; font-weight:bold;">View PO PDF</a></p>` : ''}
+    <p>Thank you.</p>
+  `;
+  try {
+    await trans.sendMail({ from, to, subject, html });
+    console.log(`✅ PO-ready email (our SMTP) sent to ${to} for order ${leadId || '–'}${pdfUrl ? ' (PDF URL included)' : ''}`);
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to send po-ready email:', err.message);
+    return false;
+  }
+}
+
+
 /**
  * Send "Sales Order ready" email from our SMTP (always send for every sales order generated).
  * Includes public PDF URL when available.

@@ -23,7 +23,8 @@ import {
   downloadPurchaseOrderPDF,
   downloadSalesOrderPDF,
   downloadInvoicePDF,
-  getPublicPaymentPDF
+  getPublicPaymentPDF,
+  getPublicPOPDF
 } from '../controllers/order/customer.js';
 
 import {
@@ -215,6 +216,7 @@ router.get('/quote-pdf', getPublicQuotePDF);
 router.get('/sales-order-pdf', getPublicSalesOrderPDF);
 router.get('/invoice-pdf', getPublicInvoicePDF);
 router.get('/payment-receipt-pdf', getPublicPaymentPDF);
+router.get('/po-pdf', getPublicPOPDF);
 
 // Add item to cart (Create order)
 router.post('/cart/add', 

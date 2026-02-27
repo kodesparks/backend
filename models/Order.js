@@ -237,6 +237,10 @@ const orderSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  zohoVendorId: {
+    type: String,
+    default: null
+  },
   // Timestamps
   orderDate: {
     type: Date,

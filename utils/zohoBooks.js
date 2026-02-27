@@ -130,7 +130,7 @@ class ZohoBooksService {
    * Create Purchase Order in Zoho Books
    * Called when: Order is placed (order_placed status)
    */
-  async createPurchaseOrder(order, vendor, customer) {
+  async createPurchaseOrder(order, vendor, customisedFeilds) {
     try {
       // When Inventory is NOT enabled, line items need account_id for expense tracking
       // Get purchase/expense account for line items
@@ -151,32 +151,6 @@ class ZohoBooksService {
         console.warn(`⚠️  Could not fetch accounts: ${accountError.message}`);
       }
 
-      // Build line items - when Inventory is disabled, account_id is REQUIRED
-      // Also need a valid item name (not just 'I')
-      const lineItems = order.items.map((item, index) => {
-        // Get item name from populated order or use a descriptive name
-        const itemName = item.itemCode?.itemDescription || 
-                        item.itemCode?.name || 
-                        `Item ${index + 1}`;
-        
-        // Limit name to 100 chars (Zoho limit)
-        const shortName = itemName.substring(0, 100);
-        
-        const lineItem = {
-          name: shortName, // Valid item name/description (required)
-          rate: item.vendorUnitPrice,
-          quantity: item.qty
-        };
-        
-        // account_id is REQUIRED when Inventory is not enabled
-        if (!purchaseAccountId) {
-          throw new Error('Purchase account_id is required for Purchase Order line items when Inventory is not enabled. Please configure accounts in Zoho Books.');
-        }
-        lineItem.account_id = purchaseAccountId;
-        
-        return lineItem;
-      });
-
       // Get or create vendor in Zoho Books - REQUIRED for Purchase Orders
       // According to Zoho API docs: vendor_id is REQUIRED
       let zohoVendorId = vendor?.zohoVendorId;
@@ -196,7 +170,38 @@ class ZohoBooksService {
       if (!zohoVendorId) {
         throw new Error('Vendor ID is required for Purchase Order creation. Please create vendor in Zoho first.');
       }
-
+      const zvendor = await this.getVendorDetails(zohoVendorId);
+      
+      const vendorState = zvendor.contact?.billing_address?.state ||
+                zvendor.contact?.place_of_supply ||
+                zvendor.contact?.place_of_contact ||
+                '';
+      // Build line items - when Inventory is disabled, account_id is REQUIRED
+      // Also need a valid item name (not just 'I')
+      const lineItems = order.items.map((item, index) => {
+        // Get item name from populated order or use a descriptive name
+        const itemName = item.itemCode?.itemDescription || 
+                        item.itemCode?.name || 
+                        `Item ${index + 1}`;
+        
+        // Limit name to 100 chars (Zoho limit)
+        const shortName = itemName.substring(0, 100);
+        
+        const lineItem = {
+          name: shortName, // Valid item name/description (required)
+          rate: item.vendorUnitPrice,
+          quantity: item.qty,
+          tax_id: getTaxId(vendorState)
+        };
+       
+        // account_id is REQUIRED when Inventory is not enabled
+        if (!purchaseAccountId) {
+          throw new Error('Purchase account_id is required for Purchase Order line items when Inventory is not enabled. Please configure accounts in Zoho Books.');
+        }
+        lineItem.account_id = purchaseAccountId;
+        
+        return lineItem;
+      });
       // Build Purchase Order payload
       // According to Zoho API: vendor_id (required) + date + line_items (required)
       // Don't set purchaseorder_number - let Zoho auto-generate
@@ -214,9 +219,9 @@ class ZohoBooksService {
       );
       if (totalLoadingCharges && totalLoadingCharges > 0) {
         purchaseOrderData.shipping_charge = String(totalLoadingCharges.toFixed(2));        
-        purchaseOrderData.shipping_charge_tax_id = "3422894000000075399"
+        purchaseOrderData.shipping_charge_tax_id = getTaxId(vendorState)
       }
-
+ 
       // Try adding vendor_name as well (some Zoho configurations might need both)
       try {
         const vendorInfo = await this.makeRequest('GET', `contacts/${zohoVendorId}`, null);
@@ -233,17 +238,19 @@ class ZohoBooksService {
       // Verify vendor exists and is active before creating PO
       try {
         const vendorCheck = await this.makeRequest('GET', `contacts/${zohoVendorId}`, null);
+        
         if (vendorCheck.contact) {
           console.log(`✅ Vendor verified: ${vendorCheck.contact.contact_name} (Status: ${vendorCheck.contact.status || 'N/A'})`);
-          if (vendorCheck.contact.status !== 'active') {
+          if (vendorCheck.contact.status !== 'Active') {
             console.warn(`⚠️  Vendor status is not 'active': ${vendorCheck.contact.status}`);
           }
         }
       } catch (checkError) {
         console.warn(`⚠️  Could not verify vendor before PO creation:`, checkError.message);
       }
+      console.log('purchaseOrderData', purchaseOrderData)
       
-      const response = await this.makeRequest('POST', 'purchaseorders', { purchaseorder: purchaseOrderData });
+      const response = await this.makeRequest('POST', 'purchaseorders',  purchaseOrderData );
       
       // Update with custom fields after creation
       if (response.purchaseorder?.purchaseorder_id) {
@@ -1177,12 +1184,17 @@ class ZohoBooksService {
         (async () => {
           try {
             const updateData = {};
-            
+            console.log('vendor',vendor)
             // Add company name if different from contact_name
             if (vendor.companyName && vendor.companyName.trim() !== cleanVendorName) {
               updateData.company_name = vendor.companyName.substring(0, 100);
             }
             
+            if (vendor.gstNumber) {
+              updateData.gst_no = vendor.gstNumber;
+              updateData.gst_treatment = business_gst;
+            }            
+
             // Add email
             if (vendor.email) {
               updateData.email = vendor.email;
@@ -1218,7 +1230,8 @@ class ZohoBooksService {
             }
             
             if (Object.keys(updateData).length > 0) {
-              await this.makeRequest('PUT', `contacts/${vendorId}`, { contact: updateData });
+              console.log(updateData);
+              await this.makeRequest('PUT', `contacts/${vendorId}`, { updateData });
               console.log(`✅ Vendor updated with additional fields`);
             }
           } catch (updateError) {
@@ -1398,15 +1411,7 @@ class ZohoBooksService {
      */
     async getCustomerDetails(customerId) {
         try {
-            // const headers = await this.getHeaders();
             const response = await this.makeRequest('GET', `contacts/${customerId}`, null);
-            
-            //     `${this.baseUrl}/contacts/${customerId}`,
-            //     {
-            //         headers,
-            //         params: { organization_id: this.organizationId }
-            //     }
-            // );
             return response;
         } catch (error) {
             console.error('❌ Error fetching Customer:', error.response?.data || error.message);
@@ -1414,6 +1419,19 @@ class ZohoBooksService {
         }
     }
 
+   /**
+     * Get Customer details from Zoho
+     */
+    async getVendorDetails(vendorId) {
+        try {
+            const response = await this.makeRequest('GET', `contacts/${vendorId}`, null);
+            return response;
+        } catch (error) {
+            console.error('❌ Error fetching Vendor:', error.response?.data || error.message);
+            throw error;
+        }
+    }
+ 
   /**
    * Create or get Customer in Zoho Books
    * @param {Object} customer - User object with customer role (must have name, email/phone from onboard)
@@ -1636,6 +1654,34 @@ class ZohoBooksService {
     try {
       const token = await this.getAccessToken();
       const url = `${this.baseURL}/customerpayments/${paymentId}`;
+      
+      const response = await axios.get(url, {
+        params: {
+          organization_id: this.organizationId,
+          accept: 'pdf'
+        },
+        headers: {
+          'Authorization': `Zoho-oauthtoken ${token}`
+        },
+        responseType: 'arraybuffer'
+      });
+
+      return Buffer.from(response.data);
+    } catch (error) {
+      console.error(`❌ Failed to get payment PDF:`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get Payemnt PDF
+   * @param {string} poId - Zoho PO ID
+   * @returns {Promise<Buffer>} PDF buffer
+   */
+  async getPOPDF(poId) {
+    try {
+      const token = await this.getAccessToken();
+      const url = `${this.baseURL}/purchaseorders/${poId}`;
       
       const response = await axios.get(url, {
         params: {

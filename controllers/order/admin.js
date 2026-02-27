@@ -5,8 +5,8 @@ import OrderPayment from '../../models/OrderPayment.js';
 import User from '../../models/User.js';
 import mongoose from 'mongoose';
 import zohoBooksService from '../../utils/zohoBooks.js';
-import { sendOrderAcceptedEmail, sendQuoteReadyEmail, sendSalesOrderReadyEmail, sendInvoiceReadyEmail, sendPaymentReceiptEmail } from '../../utils/emailService.js';
-import { getPublicQuotePdfUrl, getPublicSalesOrderPdfUrl, getPublicInvoicePdfUrl, getOrderNotificationContact, getPublicPaymentPdfUrl } from './customer.js';
+import { sendOrderAcceptedEmail, sendPOReadyEmail, sendQuoteReadyEmail, sendSalesOrderReadyEmail, sendInvoiceReadyEmail, sendPaymentReceiptEmail } from '../../utils/emailService.js';
+import { getPublicQuotePdfUrl, getPublicSalesOrderPdfUrl, getPublicInvoicePdfUrl, getOrderNotificationContact, getPublicPaymentPdfUrl, getPublicPOPdfUrl } from './customer.js';
 
 // Get all orders (Admin)
 export const getAllOrders = async (req, res) => {
@@ -689,6 +689,8 @@ export const confirmOrder = async (req, res) => {
       });
     }
 
+    const vendor = await User.findById(vendorId);
+    
     // Check if order is in correct state
     if (order.orderStatus !== 'payment_done') {
       return res.status(400).json({
@@ -727,33 +729,34 @@ export const confirmOrder = async (req, res) => {
           (orderItem.qty * unitPrice) + loadingCharges;
       }
 
+      await order.save();
 
       // Create PO in Zoho as soon as order is confirmed – then send PO email (so customer gets it without downloading PDF)
           if (!order.zohoPurchaseOrderId) {
             try {
               const populatedOrder = await Order.findById(order._id)
                 .populate('items.itemCode', 'itemDescription category subCategory units pricing zohoItemId');
-              const zohoQuote = await zohoBooksService.createPurchaseOrder(populatedOrder, {vendorEmail, vendorId, vendorEmail, vendorName, gstNumber});
-              if (zohoQuote?.estimate_id) {
-                await Order.updateOne({ _id: order._id }, { $set: { zohoQuoteId: zohoQuote.estimate_id } });
-                console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId} (at vendor_accepted)`);
-                if (customer.zohoCustomerId) {
-                  await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
-                }
-                await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
-                const notif = getOrderNotificationContact(order, customer);
-                if (notif.email) {
-                  const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
-                  await sendQuoteReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
-                  console.log(`✅ Quote-ready email (with PDF) sent to order email for ${order.leadId}`);
+              const zohoPO = await zohoBooksService.createPurchaseOrder(populatedOrder,vendor, { vendorId, vendorEmail, vendorPhone, gstNumber});
+              if (zohoPO?.purchaseorder_id) {
+                await Order.updateOne({ _id: order._id }, { $set: { zohoPurchaseOrderId: zohoPO.purchaseorder_id } });
+                console.log(`✅ Zoho PO created: ${zohoPO.purchaseorder_id} for order ${order.leadId} (at vendor_accepted)`);
+                // if (customer.zohoCustomerId) {
+                //   await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
+                // }
+                // await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
+                // const notif = getOrderNotificationContact(order, customer);
+                if (vendorEmail) {
+                  const pdfUrl = await getPublicPOPdfUrl(order.leadId);
+                  await sendPOReadyEmail(vendorEmail, vendor.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+                  console.log(`✅ PO-ready email (with PDF) sent to order email for ${order.leadId}`);
                 }
               }
-            } catch (quoteErr) {
-              console.warn(`⚠️ Quote creation at vendor_accepted failed for ${order.leadId}:`, quoteErr?.message || quoteErr);
+            } catch (poErr) {
+              console.warn(`⚠️ PO creation at vendor_accepted failed for ${order.leadId}:`, poErr?.message || poErr);
             }
           }
     // Update order status to order_confirmed
-    await order.updateStatus('order_confirmed');
+    await order.updateStatus('order_confirmed'); 
 
     // Create status update
     await OrderStatus.createStatusUpdate(
@@ -852,6 +855,7 @@ export const updateOrderStatus = async (req, res) => {
 
     //update admin pricing
     if (orderStatus === 'vendor_accepted') {
+
       for (const updatedItem of items) {
         const orderItem = order.items.find(
           i => i.itemCode.toString() === updatedItem.itemCode

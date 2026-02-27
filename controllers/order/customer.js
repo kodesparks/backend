@@ -1011,6 +1011,24 @@ export const getPublicPaymentPDF = async (req, res) => {
   }
 };
 
+export const getPublicPOPDF = async (req, res) => {
+  try {
+    const token = req.query.token;
+    if (!token) return res.status(400).json({ message: 'Missing token' });
+    // const payload = verifyInvoicePdfToken(token);
+    const payload = await validateToken(token, "payment");
+    if (!payload?.docId) return res.status(403).json({ message: 'Invalid or expired link' });
+    const order = await Order.findOne({ leadId: payload.docId, isActive: true, zohoPurchaseOrderId: { $exists: true, $ne: null } });
+    if (!order?.zohoPurchaseOrderId) return res.status(404).json({ message: 'purchase order not found or not ready yet' });
+    const pdfBuffer = await zohoBooksService.getPOPDF(order.zohoPurchaseOrderId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="po-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Public payment PDF error:', error);
+    res.status(500).json({ message: 'Failed to load payment PDF', error: error.message });
+  }
+}
 /** Public Invoice PDF (no login). Used by link in invoice-ready email. */
 export const getPublicInvoicePDF = async (req, res) => {
   try {
@@ -1040,6 +1058,13 @@ export async function getPublicQuotePdfUrl(leadId) {
   return token ? `${base}/api/order/quote-pdf?token=${token}` : null;
 }
 
+export async function getPublicPOPdfUrl(leadId) {
+  const base = (process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
+  // const token = generateQuotePdfToken(leadId);
+  const token = await createDocumentToken('po', leadId);
+  console.log('token created');
+  return token ? `${base}/api/order/po-pdf?token=${token}` : null;
+}
 /** Build public Sales Order PDF URL for email. */
 export async function getPublicSalesOrderPdfUrl(leadId) {
   const base = (process.env.BACKEND_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
