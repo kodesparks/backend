@@ -749,7 +749,14 @@ router.put('/admin/orders/:leadId/status',
       .if(body('orderStatus').equals('vendor_accepted'))
       .optional()
       .isNumeric()
-      .withMessage('Loading charges must be a number')
+      .withMessage('Loading charges must be a number'),
+    
+    body('items.*.qty')
+      .if(body('orderStatus').equals('vendor_accepted'))
+      .notEmpty()
+      .withMessage('Quantity is required')
+      .isInt({ min: 1 })
+      .withMessage('Quantity must be a positive integer'),
   ],
   updateOrderStatus
 );

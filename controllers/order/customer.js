@@ -242,7 +242,6 @@ export const addToCart = async (req, res) => {
     } else {
       customerId = req.user.userId;
     }
-    console.log(customerId);
 
     // 1️⃣ Get inventory item
     const inventoryItem = await Inventory.findById(itemCode);
@@ -397,15 +396,20 @@ export const addToCart = async (req, res) => {
       'Order created and added to cart'
     );
 
-    await order.populate([
-      { path: 'items.itemCode', select: 'itemDescription category subCategory primaryImage' },
-      { path: 'vendorId', select: 'name email phone' }
-    ]);
+    if(isAdmin) {
+        placeOrder(req, res, order.leadId, customerId);
+        console.log('Placing the order by admin')
+    } else {
+      await order.populate([
+        { path: 'items.itemCode', select: 'itemDescription category subCategory primaryImage' },
+        { path: 'vendorId', select: 'name email phone' }
+      ]);
 
-    return res.status(201).json({
-      message: 'Item added to cart successfully',
-      order
-    });
+      return res.status(201).json({
+        message: 'Item added to cart successfully',
+        order
+      });
+    }
 
   } catch (error) {
     console.error('Add to cart error:', error);
@@ -1300,7 +1304,7 @@ export const clearCart = async (req, res) => {
 };
 
 // Place order (Move from cart to placed)
-export const placeOrder = async (req, res) => {
+export const placeOrder = async (req, res, leadIdParam, customer) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -1310,8 +1314,9 @@ export const placeOrder = async (req, res) => {
       });
     }
 
-    const { leadId } = req.params;
-    const customerId = req.user.userId;
+    // const { leadId } = req.params;
+    const leadId = leadIdParam ?? req.params?.leadId;
+    const customerId = customer ? customer : req.user.userId;
     const { deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, email: payloadEmail, receiverName: payloadReceiverName, city: deliveryCity, state: deliveryState } = req.body;
 
     const order = await Order.findOne({
@@ -1320,7 +1325,7 @@ export const placeOrder = async (req, res) => {
       orderStatus: 'pending',
       isActive: true
     });
-
+    
     if (!order) {
       return res.status(404).json({
         message: 'Order not found or cannot be placed'

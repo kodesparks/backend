@@ -49,5 +49,5 @@ export const getTaxId = (stateCode) => {
     if(taxes.orgState === stateCode) {
         return taxes.taxes[0].tax_id;
     }
-    return taxes.taxes[0].tax_id;
+    return taxes.taxes[1].tax_id;
 }

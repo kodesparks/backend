@@ -724,6 +724,7 @@ export const confirmOrder = async (req, res) => {
 
         orderItem.vendorUnitPrice = unitPrice;
         orderItem.vendorLoadingCharges = loadingCharges;
+        //orderItem.qty = updatedItem.qty || orderItem.qty;
 
         orderItem.vendorTotalCost =
           (orderItem.qty * unitPrice) + loadingCharges;
@@ -807,7 +808,8 @@ export const updateOrderStatus = async (req, res) => {
       deliveryPincode,
       email,
       receiverMobileNum,
-      receiverName
+      receiverName,
+      vendorId
     } = req.body || {};
 
     if (!orderStatus) {
@@ -847,6 +849,15 @@ export const updateOrderStatus = async (req, res) => {
         });
       }
     }
+
+    if (orderStatus === 'order_confirmed') {
+      
+      if (!vendorId) {
+        return res.status(400).json({
+          message: 'Vendor Id is required for order confirmation.'
+        });
+      }
+    }
     // Store previous status before updating
     const previousStatus = order.orderStatus;
 
@@ -882,9 +893,10 @@ export const updateOrderStatus = async (req, res) => {
 
         orderItem.unitPrice = unitPrice;
         orderItem.loadingCharges = loadingCharges;
+        orderItem.qty = updatedItem.qty || orderItem.qty;
 
         orderItem.totalCost =
-          (orderItem.qty * unitPrice) + loadingCharges;
+          ((updatedItem.qty || orderItem.qty) * unitPrice) + loadingCharges;
       }
 
       // Recalculate totals

@@ -1745,9 +1745,9 @@ class ZohoBooksService {
 
       const zcustomer = await this.getCustomerDetails(zohoCustomerId);
      
-      const customerState = zcustomer.billing_address?.state ||
-                zcustomer.place_of_supply ||
-                zcustomer.place_of_contact ||
+      const customerState = zcustomer.contact?.billing_address?.state ||
+                zcustomer.contact?.place_of_supply ||
+                zcustomer.contact?.place_of_contact ||
                 '';
       // Build line items with real names and Zoho item_id when available (maintain inventory link)
       const lineItems = [];
@@ -1797,7 +1797,7 @@ class ZohoBooksService {
       // Add shipping charge if present
       if (totalLoadingCharges && totalLoadingCharges > 0) {
         quoteData.shipping_charge = String(totalLoadingCharges.toFixed(2));        
-        quoteData.shipping_charge_tax_id = "3422894000000075399"
+        quoteData.shipping_charge_tax_id = getTaxId(customerState)
       }
       
       // Add billing and shipping addresses (full address from order)
