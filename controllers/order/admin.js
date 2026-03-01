@@ -1450,9 +1450,63 @@ export const downloadSalesOrderPDF = async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    if (!order.zohoSalesOrderId) {
-      return res.status(404).json({ message: 'Sales Order not found in Zoho Books' });
+    // if (!order.zohoSalesOrderId) {
+      if (!order.zohoSalesOrderId) {
+      (async () => {
+        try {
+          const vendor = order.vendorId ? await User.findById(order.vendorId) : null;
+          const customer = await User.findById(order.custUserId);
+          let currentOrder = await Order.findById(order._id);
+
+          // If no Quote yet, create it and send quote-ready email first
+          if (!currentOrder.zohoQuoteId && customer) {
+            try {
+              const populatedForQuote = await Order.findById(order._id)
+                .populate('items.itemCode', 'itemDescription category subCategory units pricing zohoItemId');
+              const zohoQuote = await zohoBooksService.createQuote(populatedForQuote, customer);
+              if (zohoQuote?.estimate_id) {
+                await Order.updateOne({ _id: order._id }, { $set: { zohoQuoteId: zohoQuote.estimate_id } });
+                currentOrder = await Order.findById(order._id);
+                console.log(`✅ Zoho Quote created: ${zohoQuote.estimate_id} for order ${order.leadId} (before SO)`);
+                if (customer.zohoCustomerId) {
+                  await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, currentOrder, customer).catch(() => {});
+                }
+                await zohoBooksService.emailEstimate(zohoQuote.estimate_id).catch(() => {});
+                const notifQuote = getOrderNotificationContact(currentOrder, customer);
+                if (notifQuote.email) {
+                  const pdfUrl = await getPublicQuotePdfUrl(order.leadId);
+                  await sendQuoteReadyEmail(notifQuote.email, notifQuote.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+                  console.log(`✅ Quote-ready email (with PDF) sent for order ${order.leadId}`);
+                }
+              }
+            } catch (quoteErr) {
+              console.warn(`⚠️ Quote creation before SO failed for ${order.leadId}:`, quoteErr?.message || quoteErr);
+            }
+          }
+
+          const populatedOrder = await Order.findById(order._id)
+            .populate('items.itemCode', 'itemDescription category subCategory zohoItemId');
+          const zohoSO = await zohoBooksService.createSalesOrder(populatedOrder, vendor, customer);
+          if (zohoSO?.salesorder_id) {
+            await Order.updateOne({ _id: order._id }, { $set: { zohoSalesOrderId: zohoSO.salesorder_id } });
+            order.zohoSalesOrderId = zohoSO.salesorder_id;
+            console.log(`✅ Zoho Sales Order created: ${zohoSO.salesorder_id} for order ${order.leadId}`);
+            if (customer?.zohoCustomerId) {
+              await zohoBooksService.syncContactWithOrderEmail(customer.zohoCustomerId, order, customer).catch(() => {});
+            }
+            await zohoBooksService.emailSalesOrder(zohoSO.salesorder_id).catch(() => {});
+            const notif = getOrderNotificationContact(order, customer);
+            if (notif.email) {
+              const pdfUrl = await getPublicSalesOrderPdfUrl(order.leadId);
+              await sendSalesOrderReadyEmail(notif.email, notif.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => {});
+            }
+          }
+        } catch (error) {
+          console.error(`❌ Failed to create Zoho Sales Order for order ${order.leadId}:`, error.message);
+        }
+      })();
     }
+    // }
 
     const pdfBuffer = await zohoBooksService.getSalesOrderPDF(order.zohoSalesOrderId);
 
