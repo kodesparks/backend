@@ -865,20 +865,7 @@ class ZohoBooksService {
     try {
       // Build line items with real names and Zoho item_id when available (maintain inventory link)
       const lineItems = [];
-      for (const orderItem of order.items) {
-        const inventoryItem = orderItem.itemCode;
-        let itemId = inventoryItem?.zohoItemId || null;
-        if (!itemId && inventoryItem) {
-          itemId = await this.createOrGetItem(inventoryItem);
-        }
-        const realName = (inventoryItem?.itemDescription || inventoryItem?.name || 'Item').trim();
-        const nameForZoho = realName.length ? realName.substring(0, 255) : 'Item';
-        if (itemId) {
-          lineItems.push({ item_id: itemId, rate: orderItem.unitPrice, quantity: orderItem.qty });
-        } else {
-          lineItems.push({ name: nameForZoho, rate: orderItem.unitPrice, quantity: orderItem.qty });
-        }
-      }
+      
 
       // Get or create customer in Zoho; always call createOrGetCustomer when we have customer so email/phone are synced (for invoice email)
       let zohoCustomerId = null;
@@ -894,6 +881,27 @@ class ZohoBooksService {
         }
       }
 
+      const zcustomer = await this.getCustomerDetails(zohoCustomerId);
+     
+      const customerState = zcustomer.contact?.billing_address?.state ||
+                zcustomer.contact?.place_of_supply ||
+                zcustomer.contact?.place_of_contact ||
+                '';
+
+      for (const orderItem of order.items) {
+        const inventoryItem = orderItem.itemCode;
+        let itemId = inventoryItem?.zohoItemId || null;
+        if (!itemId && inventoryItem) {
+          itemId = await this.createOrGetItem(inventoryItem);
+        }
+        const realName = (inventoryItem?.itemDescription || inventoryItem?.name || 'Item').trim();
+        const nameForZoho = realName.length ? realName.substring(0, 255) : 'Item';
+        if (itemId) {
+          lineItems.push({ item_id: itemId, rate: orderItem.unitPrice, quantity: orderItem.qty, tax_id: getTaxId(customerState) });
+        } else {
+          lineItems.push({ name: nameForZoho, rate: orderItem.unitPrice, quantity: orderItem.qty, tax_id: getTaxId(customerState) });
+        }
+      }
       // Billing/shipping: prefer order delivery address, fallback to customer profile
       // Billing/shipping: ONLY from order (place order API). Never use Zoho contact/signup address.
       const deliveryAddr = this._getBillingAddressForZoho(order);
@@ -935,7 +943,7 @@ class ZohoBooksService {
       // Add shipping charge if present
       if (totalLoadingCharges && totalLoadingCharges > 0) {
         invoiceData.shipping_charge = String(totalLoadingCharges.toFixed(2));
-        invoiceData.shipping_charge_tax_id = "3422894000000075399";
+        invoiceData.shipping_charge_tax_id = getTaxId(customerState);
       }
       
       // Do NOT send billing_address/shipping_address on create – Zoho returns same error as Sales Order:
