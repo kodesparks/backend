@@ -623,6 +623,12 @@ class ZohoBooksService {
         throw new Error('Customer ID is required for Sales Order creation. Please create customer in Zoho first.');
       }
 
+      const zcustomer = await this.getCustomerDetails(zohoCustomerId);
+     
+      const customerState = zcustomer.contact?.billing_address?.state ||
+                zcustomer.contact?.place_of_supply ||
+                zcustomer.contact?.place_of_contact ||
+                '';
       // Try to use item_id if items exist in Zoho, otherwise use name
       const lineItems = [];
       for (const orderItem of order.items) {
@@ -649,7 +655,8 @@ class ZohoBooksService {
           lineItems.push({
             name: itemName.substring(0, 100),
             rate: orderItem.unitPrice,
-            quantity: orderItem.qty
+            quantity: orderItem.qty,
+            tax_id: getTaxId(customerState)
           });
         }
       }
@@ -680,7 +687,7 @@ class ZohoBooksService {
 
       if (totalLoadingCharges && totalLoadingCharges > 0) {
         salesOrderData.shipping_charge = String(totalLoadingCharges.toFixed(2));
-        salesOrderData.shipping_charge_tax_id = "3422894000000075399";
+        salesOrderData.shipping_charge_tax_id = getTaxId(customerState);
       }
       // Add shipping charge if present
       // if (order.deliveryCharges && order.deliveryCharges > 0) {
