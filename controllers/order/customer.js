@@ -341,7 +341,7 @@ export const addToCart = async (req, res) => {
 
       await order.save();
       if(isAdmin) {
-        placeOrder(req, res);
+        placeOrderFromAdmin(req, res, order.leadId, customerId);
       } else {
         await order.populate([
           { path: 'items.itemCode', select: 'itemDescription category subCategory primaryImage' },
@@ -397,7 +397,7 @@ export const addToCart = async (req, res) => {
     );
 
     if(isAdmin) {
-        placeOrder(req, res, order.leadId, customerId);
+        placeOrderFromAdmin(req, res, order.leadId, customerId);
         console.log('Placing the order by admin')
     } else {
       await order.populate([
@@ -1303,8 +1303,139 @@ export const clearCart = async (req, res) => {
   }
 };
 
-// Place order (Move from cart to placed)
-export const placeOrder = async (req, res, leadIdParam, customer) => {
+// Place order
+export const placeOrder = async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { leadId } = req.params;
+    const customerId = req.user.userId;
+    // const leadId = leadIdParam ?? req.params?.leadId;
+    // const customerId = customer ? customer : req.user.userId;
+    const { deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, email: payloadEmail, receiverName: payloadReceiverName, city: deliveryCity, state: deliveryState } = req.body;
+
+    const order = await Order.findOne({
+      leadId,
+      custUserId: customerId,
+      orderStatus: 'pending',
+      isActive: true
+    });
+    
+    if (!order) {
+      return res.status(404).json({
+        message: 'Order not found or cannot be placed'
+      });
+    }
+
+    if (order.items.length === 0) {
+      return res.status(400).json({
+        message: 'Cannot place empty order'
+      });
+    }
+
+    // Save ONLY the address from this request (place order API). This is what we use for Quote/SO/Invoice in Zoho – never contact/signup address.
+    // const addressTrimmed = (deliveryAddress != null && String(deliveryAddress).trim()) ? String(deliveryAddress).trim() : '';
+    // if (!addressTrimmed) {
+    //   return res.status(400).json({
+    //     message: 'Delivery address is required when placing order'
+    //   });
+    // }
+    // order.deliveryAddress = addressTrimmed;
+    order.deliveryPincode = deliveryPincode != null ? String(deliveryPincode).trim() : order.deliveryPincode;
+    if (deliveryCity != null && String(deliveryCity).trim()) order.deliveryCity = String(deliveryCity).trim();
+    if (deliveryState != null && String(deliveryState).trim()) order.deliveryState = String(deliveryState).trim();
+    order.deliveryExpectedDate = deliveryExpectedDate;
+    order.receiverMobileNum = receiverMobileNum;
+    // Store email/name from place order for quote, sales order, and invoice notifications
+    const profile = await User.findById(customerId).select('email name').lean();
+    order.orderEmail = (payloadEmail && String(payloadEmail).trim()) || profile?.email || null;
+    order.orderReceiverName = (payloadReceiverName && String(payloadReceiverName).trim()) || profile?.name || null;
+    
+    // Change order status from pending to order_placed
+    order.orderStatus = 'order_placed';
+
+    await order.save();
+
+    // Create status update
+    await OrderStatus.createStatusUpdate(
+      order.leadId,
+      order.invcNum,
+      order.vendorId,
+      'order_placed',
+      customerId,
+      'Order placed and sent to vendor'
+    );
+
+    // Create delivery record
+    const delivery = new OrderDelivery({
+      leadId: order.leadId,
+      invcNum: order.invcNum,
+      userId: customerId,
+      address: "",
+      pincode: deliveryPincode,
+      deliveryExpectedDate: deliveryExpectedDate,
+      deliveryStatus: 'pending'
+    });
+
+    await delivery.save();
+
+    // Send order-placed confirmation email from our side (SMTP) – use stored order email/name
+    (async () => {
+      try {
+        const emailToSend = order.orderEmail;
+        const nameToUse = order.orderReceiverName || 'Customer';
+        if (emailToSend) {
+          await sendOrderPlacedEmail(
+            emailToSend,
+            nameToUse,
+            {
+              leadId: order.leadId,
+              formattedLeadId: order.formattedLeadId,
+              totalAmount: order.totalAmount,
+              deliveryAddress: order.deliveryAddress,
+              deliveryExpectedDate: order.deliveryExpectedDate,
+              itemCount: order.items?.length || 0
+            }
+          );
+        } else {
+          console.warn(`⚠️  Order-placed email skipped: no email in payload and no profile email for customer ${customerId}`);
+        }
+      } catch (err) {
+        console.warn('⚠️  Order-placed email failed:', err?.message || err);
+      }
+    })();
+
+    // Quote is created when order is CONFIRMED (order_confirmed), not on place. See admin updateOrderStatus.
+
+    res.status(200).json({
+      message: 'Order placed successfully',
+      order: {
+        leadId: order.leadId,
+        formattedLeadId: order.formattedLeadId,
+        totalAmount: order.totalAmount,
+        orderStatus: order.orderStatus,
+        vendorId: order.vendorId,
+        deliveryAddress: order.deliveryAddress,
+        deliveryExpectedDate: order.deliveryExpectedDate
+      }
+    });
+
+  } catch (error) {
+    console.error('Place order error:', error);
+    res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+// Place order from admin(Move from cart to placed)
+export const placeOrderFromAdmin = async (req, res, leadIdParam, customer) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -1325,7 +1456,7 @@ export const placeOrder = async (req, res, leadIdParam, customer) => {
       orderStatus: 'pending',
       isActive: true
     });
-    
+
     if (!order) {
       return res.status(404).json({
         message: 'Order not found or cannot be placed'
