@@ -1669,6 +1669,36 @@ export const downloadInvoicePDF = async (req, res) => {
   }
 };
 
+export const downloadPaymentPDF = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+
+    let order = await Order.findOne({
+      leadId,
+      isActive: true
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if(!order.zohoPaymentId) {
+      return res.status(404).json({message: "Payment reciept not found"});
+    }
+
+    const pdfBuffer = await zohoBooksService.getPaymentPDF(order.zohoPaymentId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Invoice-${order.leadId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Download Invoice PDF error:', error);
+    res.status(500).json({
+      message: 'Failed to download Invoice PDF',
+      error: error.message
+    });
+  }
+}
 // Get order status history (Admin)
 export const getStatusHistory = async (req, res) => {
   try {

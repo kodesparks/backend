@@ -61,7 +61,8 @@ import {
   downloadPurchaseOrderPDF as downloadAdminPurchaseOrderPDF,
   downloadQuotePDF as downloadAdminQuotePDF,
   downloadSalesOrderPDF as downloadAdminSalesOrderPDF,
-  downloadInvoicePDF as downloadAdminInvoicePDF
+  downloadInvoicePDF as downloadAdminInvoicePDF,
+  downloadPaymentPDF
 } from '../controllers/order/admin.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { requireRole } from '../middleware/auth.js';
@@ -372,6 +373,13 @@ router.get('/customer/orders/:leadId/pdf/po',
   downloadPurchaseOrderPDF
 );
 
+// Download Payment PDF (Customer; only when vendor assigned and PO created)
+router.get('/customer/orders/:leadId/pdf/payment',
+  authenticateToken,
+  leadIdValidation,
+  downloadPaymentPDF
+);
+
 // Download Sales Order PDF (Customer; available after admin/vendor generates SO)
 router.get('/customer/orders/:leadId/pdf/sales-order',
   authenticateToken,
@@ -623,6 +631,13 @@ router.get('/admin/orders/:leadId/pdf/po',
   requireRole(['admin']),
   leadIdValidation,
   downloadAdminPurchaseOrderPDF
+);
+
+// Download Purchase Order PDF (Customer; only when vendor assigned and PO created)
+router.get('/admin/orders/:leadId/pdf/payment',
+  authenticateToken,
+  leadIdValidation,
+  downloadPaymentPDF
 );
 
 // Download Quote PDF (Admin)
