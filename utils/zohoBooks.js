@@ -171,7 +171,10 @@ class ZohoBooksService {
         throw new Error('Vendor ID is required for Purchase Order creation. Please create vendor in Zoho first.');
       }
       const zvendor = await this.getVendorDetails(zohoVendorId);
-      
+      console.log('zvendor', zvendor.contact.gst_treatment);
+      if(zvendor?.contact?.gst_treatment !== 'business_gst') {
+        this.updateVendorRegistration(zohoVendorId);
+      }
       const vendorState = zvendor.contact?.billing_address?.state ||
                 zvendor.contact?.place_of_supply ||
                 zvendor.contact?.place_of_contact ||
@@ -1447,6 +1450,37 @@ class ZohoBooksService {
         }
     }
  
+  async updateVendorRegistration(vendorId) {
+    try {
+      // If vendor already has Zoho ID, return it
+      if (!vendorId) {
+        return;
+      }
+      console.log(`✅ Vendor updating in Zoho: ${vendorId}`);
+
+      // Update vendor with additional fields (non-blocking)
+      (async () => {
+        try {
+          const updateData = {
+            gst_treatment: 'business_gst'
+          };
+
+          await this.makeRequest('PUT', `contacts/${vendorId}`, { ...updateData });
+          console.log(`✅ Vendor Registration update done`);
+
+        } catch (updateError) {
+          console.warn(`⚠️  Failed to update vendor with registration fields:`, updateError.message);
+          // Don't fail - vendor was created successfully
+        }
+      })();
+
+      return vendorId;
+
+    } catch (error) {
+      console.error(`❌ Failed to create/get vendor in Zoho Books:`, error.response?.data || error.message);
+      throw error;
+    }
+  }
   /**
    * Create or get Customer in Zoho Books
    * @param {Object} customer - User object with customer role (must have name, email/phone from onboard)
