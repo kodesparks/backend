@@ -512,8 +512,7 @@ export const markPaymentDone = async (req, res) => {
       payment.paymentDate = paymentDate;
       payment.refNum = leadId || '';
 
-      const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer);
-
+      const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer, leadId);
       await payment.save();
       if (createPayReciept?.payment_id) {
         order.zohoPaymentId = createPayReciept.payment_id;
@@ -552,7 +551,8 @@ export const markPaymentDone = async (req, res) => {
       }
 
       payment = await OrderPayment.create(paymentData);
-      const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer);
+      const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer, leadId);
+      
       await payment.save();
       if (createPayReciept?.payment_id) {
         order.zohoPaymentId = createPayReciept.payment_id;

@@ -1910,7 +1910,8 @@ class ZohoBooksService {
    * Called when: Payment is completed
    * Step 3: Payment completed → Generate payment receipt
    */
-  async createPaymentReceipt(paymentData, customer) {
+  async createPaymentReceipt(paymentData, customer, refNumber) {
+    
     try {
       let zohoCustomerId = null;
       if (customer) {
@@ -1928,17 +1929,15 @@ class ZohoBooksService {
       if (!zohoCustomerId) {
         throw new Error('Customer ID is required for payment receipt creation. Please create customer in Zoho first.');
       }
-      console.log(paymentData);
       // paymentData should contain: amount, payment_mode, date, reference_number, etc.
       const receiptData = {
         customer_id: zohoCustomerId,
         payment_mode: paymentData.paymentMode || 'cash', // cash, bank_transfer, online, etc.
         amount: paymentData.paidAmount,
         date: paymentData.date || new Date().toISOString().split('T')[0],
-        reference_number: paymentData.refNum || '',
+        reference_number: refNumber || '',
         description: paymentData.description || 'Payment received',        
       };
-
       console.log('📤 Creating Payment Receipt in Zoho:', JSON.stringify({ payment: receiptData }, null, 2));
       const response = await this.makeRequest('POST', 'customerpayments', receiptData);
       
