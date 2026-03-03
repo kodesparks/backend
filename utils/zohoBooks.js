@@ -980,6 +980,27 @@ class ZohoBooksService {
             await this.makeRequest('PUT', `invoices/${response.invoice.invoice_id}`, updateData);
             console.log(`✅ Invoice updated with custom fields`);
           }
+
+          //update invoice id in payment reciept
+          if (order.zohoPaymentId) {
+            const paymentUpdate = {
+              invoices: [
+                {
+                    invoice_id: response.invoice.invoice_id,
+                    invoice_number: response.invoice.invoice_number,
+                    amount_applied: response.invoice.total
+                }
+            ],
+              invoice_id: response.invoice.invoice_id,        
+            };
+            console.log('📤 Updating invoice number in Payment Receipt in Zoho:', JSON.stringify({ payment: paymentUpdate }, null, 2));
+            try {
+              const response = await this.makeRequest('PUT', `customerpayments/${order.zohoPaymentId}`, paymentUpdate);
+              console.log('Invoice updated in pyament receipt.')
+            } catch(e) {
+              console.log('Invoice update in payament reciept failed', e.message);
+            }
+          }
         
         } catch (updateError) {
           console.warn(`⚠️  Failed to update Invoice with custom fields:`, updateError.message);
