@@ -55,7 +55,7 @@ const signup = async (req, res, next) => {
 
     // Add role-specific fields
     if (['admin', 'manager', 'employee', 'vendor'].includes(role)) {
-      userData.employeeId = employeeId;
+      userData.employeeId = employeeId || undefined;
       userData.aadharNumber = aadharNumber;
       userData.panCard = panCard;
       userData.joiningDate = joiningDate;

@@ -1207,7 +1207,7 @@ class ZohoBooksService {
             
             if (vendor.gstNumber) {
               updateData.gst_no = vendor.gstNumber;
-              updateData.gst_treatment = business_gst;
+              updateData.gst_treatment = 'business_gst';
             }            
 
             // Add email
@@ -1901,7 +1901,7 @@ class ZohoBooksService {
         payment_mode: paymentData.paymentMode || 'cash', // cash, bank_transfer, online, etc.
         amount: paymentData.paidAmount,
         date: paymentData.date || new Date().toISOString().split('T')[0],
-        reference_number: paymentData.refNum || paymentData.referenceNumber || paymentData.utr || '',
+        reference_number: paymentData.refNum || '',
         description: paymentData.description || 'Payment received',        
       };
 

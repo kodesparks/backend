@@ -510,7 +510,7 @@ export const markPaymentDone = async (req, res) => {
         payment.utrNum = transactionId; // Store as UTR for bank transfers
       }
       payment.paymentDate = paymentDate;
-      payment.refNum = order.leadId || '';
+      payment.refNum = leadId || '';
 
       const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer);
 
@@ -542,7 +542,7 @@ export const markPaymentDone = async (req, res) => {
         paidAmount: paidAmount,
         paymentMethod: paymentMethod,
         paymentDate: paymentDate,
-        refNum: order.leadId || ''
+        refNum: leadId || ''
       };
 
       // Add transactionId if provided, otherwise let default generate
