@@ -212,6 +212,7 @@ class ZohoBooksService {
       // When Inventory is disabled, ensure all required fields are present
       const purchaseOrderData = {
         vendor_id: zohoVendorId,
+        reference_number: order.leadId,
         date: new Date().toISOString().split('T')[0],
         line_items: lineItems,
         // place_of_supply: order.deliveryState ? getStateCode(order.deliveryState) : ''

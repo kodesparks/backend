@@ -549,12 +549,13 @@ export const markPaymentDone = async (req, res) => {
         paymentData.transactionId = transactionId;
         paymentData.utrNum = transactionId; // Store as UTR for bank transfers
       }
-
-      payment = await OrderPayment.create(paymentData);
-      const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer, leadId);
+      try {
+        payment = await OrderPayment.create(paymentData);     
       
-      await payment.save();
-      if (createPayReciept?.payment_id) {
+        const createPayReciept = await zohoBooksService.createPaymentReceipt(payment, customer, leadId);
+     
+        await payment.save();
+        if (createPayReciept?.payment_id) {
         order.zohoPaymentId = createPayReciept.payment_id;
         await order.save();
         console.log(`✅ Zoho Payment created: ${createPayReciept.payment_id} for order ${order.leadId}`);
@@ -567,6 +568,25 @@ export const markPaymentDone = async (req, res) => {
           await sendPaymentReceiptEmail(notifInv.email, notifInv.name, order.leadId, order.formattedLeadId, pdfUrl).catch(() => { });
         }
       }
+      } catch(error) {
+        console.error('Mark payment done error:', error.message);
+        if (error.code === 11000) {
+          const field = Object.keys(error.keyValue)[0];
+          const value = error.keyValue[field];
+
+          return res.status(400).json({
+            success: false,
+            message: `${field} '${value}' already exists`,
+            field: field
+          });
+        }
+
+        res.status(500).json({
+          success: false,
+          message: "Something went wrong"
+        });
+      }
+      
     }
     // Update order status to payment_done
     await order.updateStatus('payment_done');

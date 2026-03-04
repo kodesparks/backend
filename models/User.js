@@ -384,15 +384,6 @@ userSchema.statics.getRoleConfig = function(role) {
 
 // Indexes for better performance
 userSchema.index({ role: 1, isActive: 1 });
-userSchema.index(
-  { employeeId: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      employeeId: { $type: "string" }
-    }
-  }
-);
 userSchema.index({ email: 1 });
 userSchema.index({ phone: 1 });
 
