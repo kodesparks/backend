@@ -570,7 +570,7 @@ export const updateOrder = async (req, res) => {
     const { items, deliveryAddress, deliveryPincode, deliveryExpectedDate, receiverMobileNum, accNumber, utrNum, paidAmount } = req.body;
 
     let order;
-    if(accNumber) {
+    if(paidAmount || utrNum) {
       order = await Order.findOne({
         leadId,
         custUserId: customerId,

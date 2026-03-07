@@ -515,6 +515,17 @@ const createUser = async (req, res, next) => {
     }
     
     await user.save();
+    //Create vendor in zoho portal
+    try {
+      const zohoVendorId = await zohoBooksService.createVendor(userData);
+      if(zohoVendorId) {
+        user.zohoVendorId = zohoVendorId;
+        await user.save();
+      }
+    } catch (e) {
+      console.error(`❌ Vendor creation failed in zoho:`, e.message);
+    }
+    
     
     // Remove password from response
     const userResponse = user.toObject();

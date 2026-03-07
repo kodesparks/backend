@@ -1128,6 +1128,96 @@ class ZohoBooksService {
   }
 
   /**
+   * Create Vendor in Zoho Books
+   * @param {Object} vendor
+   * @returns {Promise<string>} Zoho Vendor ID
+   */
+  async createVendor(vendor) {
+    try {
+
+      let vendorName = (vendor.companyName || vendor.name || 'Vendor').trim();
+
+      if (!vendorName || vendorName.length < 2) {
+        throw new Error('Vendor name must be at least 2 characters');
+      }
+
+      const contactData = {
+        contact_name: vendorName.substring(0, 100),
+        contact_type: "vendor"
+      };
+
+      console.log("📤 Creating Zoho Vendor:", contactData);
+
+      const response = await this.makeRequest(
+        "POST",
+        "contacts",
+        contactData
+      );
+
+      if (!response.contact?.contact_id) {
+        throw new Error("Vendor creation failed");
+      }
+
+      const vendorId = response.contact.contact_id;
+
+      console.log(`✅ Vendor created in Zoho: ${vendorId}`);
+
+      // Additional fields update
+      const updateData = {};
+
+      if (vendor.companyName) {
+        updateData.company_name = vendor.companyName.substring(0, 100);
+      }
+
+      if (vendor.email) {
+        updateData.email = vendor.email;
+      }
+
+      if (vendor.phone) {
+        updateData.phone = vendor.phone;
+      }
+
+      if (vendor.gstNumber) {
+        updateData.gst_no = vendor.gstNumber;
+        updateData.gst_treatment = "business_gst";
+      }
+
+      if (vendor.panCard) {
+        updateData.pan_no = vendor.panCard.substring(0, 10);
+      }
+
+      if (vendor.address) {
+        updateData.billing_address = {
+          address: vendor.address,
+          city: vendor.city || "",
+          state: vendor.state || "",
+          zip: vendor.pincode || "",
+          country: vendor.country || "India"
+        };
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        await this.makeRequest(
+          "PUT",
+          `contacts/${vendorId}`,
+          updateData
+        );
+
+        console.log("✅ Vendor updated with additional details");
+      }
+
+      return vendorId;
+
+    } catch (error) {
+      console.error(
+        "❌ Zoho Vendor creation failed:",
+        error.response?.data || error.message
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Create or get Vendor in Zoho Books
    * @param {Object} vendor - User object with vendor role
    * @returns {Promise<string>} Zoho Vendor ID

@@ -133,10 +133,6 @@ const updateOrderValidation = [
     .optional()
     .matches(/^[A-Za-z0-9]{8,25}$/)
     .withMessage('Valid UTR number is required'),
-  body('accNumber')
-    .optional()
-    .matches(/^[0-9]{9,18}$/)
-    .withMessage('Valid account number is required'),
   body('paidAmount')
     .optional()
     .isFloat({ min: 0 })
